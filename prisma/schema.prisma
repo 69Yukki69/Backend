@@ -1,0 +1,261 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  previewFeatures = ["driverAdapters"]
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum Role {
+  ADMIN
+  CASHIER
+  STOCK_MANAGER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  OUT_OF_STOCK
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PaymentMethod {
+  CASH
+  GCASH
+}
+
+enum SaleStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum LogType {
+  STOCK_IN
+  STOCK_OUT
+  ADJUSTMENT
+}
+
+enum OrderStatus {
+  PENDING
+  DELIVERED
+  CANCELLED
+}
+
+enum CategoryType {
+  SOFTDRINKS
+  ENERGY_DRINK
+  BEER
+  JUICE
+  WATER
+  OTHER
+}
+
+model Employee {
+  id           String     @id
+  name         String     @unique
+  hashPassword String
+  phone        String     @unique
+  role         Role
+  userStatus   UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  saleRecords   SaleRecord[]
+  inventoryLogs InventoryLog[]
+}
+
+model Customer {
+  id           String     @id
+  name         String
+  email        String?    @unique
+  address      String?
+  phone        String?    @unique
+  hashPassword String
+  userStatus   UserStatus @default(ACTIVE)  // ← add this
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  saleRecords  SaleRecord[]
+  shoppingCart ShoppingCart?
+}
+
+model Supplier {
+  id           String         @id
+  supplierName String
+  contactNo    String
+  address      String?
+  email        String?
+  lastOrdered  Int?
+  dateChecked  DateTime?
+  lastCheckBy  String?
+  status       SupplierStatus @default(ACTIVE)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  products     Product[]
+  deliveries   Delivery[]
+}
+
+model Product {
+  id            String        @id
+  productName   String
+  category      CategoryType  @default(SOFTDRINKS)
+  size          String?
+  barcode       String?       @unique
+  price         Float
+  stockQuantity Int           @default(0)
+  expiryDate    DateTime?
+  image         String?
+  status        ProductStatus @default(ACTIVE)
+  supplierId    String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  supplier          Supplier          @relation(fields: [supplierId], references: [id])
+  orderLines        OrderLine[]
+  promotionSales    PromotionSale[]
+  shoppingCartItems ShoppingCartItem[]
+  inventoryLogs     InventoryLog[]
+  deliveryItems     DeliveryItem[]
+}
+
+model SaleRecord {
+  id          String     @id
+  employeeId  String
+  customerId  String?
+  totalAmount Float
+  discount    Float      @default(0)
+  status      SaleStatus @default(PENDING)
+  saleDate    DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  employee    Employee   @relation(fields: [employeeId], references: [id])
+  customer    Customer?  @relation(fields: [customerId], references: [id])
+  orderLines  OrderLine[]
+  payment     Payment?
+}
+
+model OrderLine {
+  id          String   @id
+  saleId      String
+  productId   String
+  quantity    Int
+  price       Float
+  subtotal    Float
+  createdAt   DateTime @default(now())
+
+  saleRecord  SaleRecord @relation(fields: [saleId], references: [id])
+  product     Product    @relation(fields: [productId], references: [id])
+}
+
+model Payment {
+  id             String        @id
+  saleId         String        @unique
+  amount         Float
+  method         PaymentMethod @default(CASH)
+  amountTendered Float?
+  change         Float?
+  paidAt         DateTime      @default(now())
+  createdAt      DateTime      @default(now())
+
+  saleRecord     SaleRecord    @relation(fields: [saleId], references: [id])
+}
+
+model ShoppingCart {
+  id         String   @id
+  customerId String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  customer   Customer          @relation(fields: [customerId], references: [id])
+  items      ShoppingCartItem[]
+}
+
+model ShoppingCartItem {
+  id             String   @id
+  shoppingCartId String
+  productId      String
+  quantity       Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  shoppingCart   ShoppingCart @relation(fields: [shoppingCartId], references: [id])
+  product        Product      @relation(fields: [productId], references: [id])
+}
+
+model PromotionSale {
+  id              String   @id
+  productId       String
+  promoName       String
+  alteredPrice    Float
+  discountPercent Float?
+  dateEffective   DateTime
+  lastDate        DateTime
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  product         Product  @relation(fields: [productId], references: [id])
+}
+
+model InventoryLog {
+  id          String   @id
+  productId   String
+  employeeId  String
+  quantity    Int
+  type        LogType
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  product     Product  @relation(fields: [productId], references: [id])
+  employee    Employee @relation(fields: [employeeId], references: [id])
+}
+
+model Delivery {
+  id           String      @id
+  supplierId   String
+  deliveryDate DateTime
+  status       OrderStatus @default(PENDING)
+  totalItems   Int
+  notes        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  supplier     Supplier      @relation(fields: [supplierId], references: [id])
+  items        DeliveryItem[]
+}
+
+model DeliveryItem {
+  id          String   @id
+  deliveryId  String
+  productId   String
+  quantity    Int
+  costPrice   Float
+  createdAt   DateTime @default(now())
+
+  delivery    Delivery @relation(fields: [deliveryId], references: [id])
+  product     Product  @relation(fields: [productId], references: [id])
+}
