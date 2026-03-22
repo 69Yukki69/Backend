@@ -12,9 +12,9 @@ import { CreateEmployeeDto, UpdateEmployeeDto, LoginEmployeeDto } from '../dto/e
 
 const router = Router();
 
+router.post('/login', validate(LoginEmployeeDto), loginEmployee);
 router.get('/', getEmployees);
 router.get('/:id', getEmployee);
-router.post('/login', validate(LoginEmployeeDto), loginEmployee);
 router.post('/', validate(CreateEmployeeDto), createEmployee);
 router.put('/:id', validate(UpdateEmployeeDto), updateEmployee);
 router.delete('/:id', deleteEmployee);
