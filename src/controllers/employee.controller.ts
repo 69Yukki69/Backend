@@ -47,7 +47,9 @@ export const createEmployee = async (req: Request, res: Response) => {
         name,
         hashPassword,
         role,
-        phone
+        phone,
+        userStatus: 'ACTIVE'
+
       }
     });
 
