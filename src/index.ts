@@ -9,7 +9,9 @@ import productRoute from './routes/product.routes';
 const app = express();
 
 app.use(cors({
-  origin: 'http://localhost:3000',
+  origin: ['http://localhost:3000',
+    'https://my-app-phi-pearl-24.vercel.app/'
+  ],
   credentials: true
 }));
 app.use(express.json());
