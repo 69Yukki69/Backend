@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { ENV } from './config/env';
 import employeeRoute from './routes/employee.routes';
@@ -11,7 +11,9 @@ const app = express();
 app.use(cors({
   origin: [
     'http://localhost:3000',
-    'https://my-app-phi-pearl-24.vercel.app',
+    'http://localhost:3001',
+    'http://localhost:3002',
+    'https://my-app-phi-pearl-24.vercel.app',  // ← exact Vercel URL
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -27,6 +29,10 @@ app.use('/api/employees', employeeRoute);
 app.use('/api/suppliers', supplierRoute);
 app.use('/api/customers', customerRoute);
 app.use('/api/products', productRoute);
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK' });
+});
 
 app.listen(ENV.PORT || 5000, () => {
   console.log(`Server running on port ${ENV.PORT || 5000}`);
