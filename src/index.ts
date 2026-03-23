@@ -13,8 +13,14 @@ app.use(cors({
     'http://localhost:3000',
     'https://my-app-phi-pearl-24.vercel.app',
   ],
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// ✅ Handle preflight requests
+app.options('*', cors());
+
 app.use(express.json());
 
 app.use('/api/employees', employeeRoute);
