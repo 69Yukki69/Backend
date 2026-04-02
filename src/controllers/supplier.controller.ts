@@ -6,7 +6,15 @@ import { generateId } from '../util/generateId';
 export const getSuppliers = async (req: Request, res: Response) => {
   try {
     const suppliers = await prisma.supplier.findMany({
-      orderBy: { id: 'asc' }
+      orderBy: { id: 'asc' },
+      include: {
+        products: {
+          select: {
+            id: true,
+            productName: true
+          }
+        }
+      }
     });
     res.json(suppliers);
   } catch (err) {
