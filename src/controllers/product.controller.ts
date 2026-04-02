@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/db';
 import { generateId } from '../util/generateId';
+import { getStock, getStockMany } from '../util/stock';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -8,7 +9,11 @@ export const getProducts = async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
       include: { supplier: true }
     });
-    res.json(products);
+
+    const stockMap = await getStockMany(products.map(p => p.id));
+    const result = products.map(p => ({ ...p, stock: stockMap[p.id] ?? 0 }));
+
+    res.json(result);
   } catch (err) {
     res.status(500).json({ message: 'Failed to get products', error: err });
   }
@@ -21,7 +26,9 @@ export const getProduct = async (req: Request, res: Response) => {
       include: { supplier: true }
     });
     if (!product) return res.status(404).json({ message: 'Product not found' });
-    res.json(product);
+
+    const stock = await getStock(product.id);
+    res.json({ ...product, stock });
   } catch (err) {
     res.status(500).json({ message: 'Failed to get product', error: err });
   }
@@ -29,7 +36,8 @@ export const getProduct = async (req: Request, res: Response) => {
 
 export const createProduct = async (req: Request, res: Response) => {
   try {
-    const { productName, category, size, price, stockQuantity, supplierId, image, barcode, expiryDate, status } = req.body;
+    // removed stockQuantity from destructure
+    const { productName, category, size, price, supplierId, image, barcode, expiryDate, status } = req.body;
     const id = await generateId('product');
     const product = await prisma.product.create({
       data: {
@@ -53,7 +61,8 @@ export const createProduct = async (req: Request, res: Response) => {
 
 export const updateProduct = async (req: Request, res: Response) => {
   try {
-    const { productName, category, size, price, stockQuantity, image, barcode, expiryDate, status } = req.body;
+    // removed stockQuantity from destructure
+    const { productName, category, size, price, image, barcode, expiryDate, status } = req.body;
     const product = await prisma.product.update({
       where: { id: String(req.params.id) },
       data: {
