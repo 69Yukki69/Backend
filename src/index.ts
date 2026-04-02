@@ -24,6 +24,13 @@ app.use(cors(corsOptions)); // ← no app.options('*') needed
 
 app.use(express.json());
 
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 app.use('/api/employees', employeeRoute);
 app.use('/api/suppliers', supplierRoute);
 app.use('/api/customers', customerRoute);
