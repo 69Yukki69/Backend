@@ -5,6 +5,7 @@ import employeeRoute from './routes/employee.routes';
 import supplierRoute from './routes/supplier.route';
 import customerRoute from './routes/customer.routes';
 import productRoute from './routes/product.routes';
+import deliveryRoute from './routes/delivery.routes';
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.use('/api/employees', employeeRoute);
 app.use('/api/suppliers', supplierRoute);
 app.use('/api/customers', customerRoute);
 app.use('/api/products', productRoute);
+app.use("/api/deliveries", deliveryRoute);
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });
