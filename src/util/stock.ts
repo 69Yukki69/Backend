@@ -1,4 +1,3 @@
-// src/lib/inventory.ts
 import  prisma from '../config/db'
 
 export async function getStock(productId: string): Promise<number> {
