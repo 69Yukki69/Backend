@@ -125,7 +125,6 @@ model Product {
   size          String?
   barcode       String?       @unique
   price         Float
-  stockQuantity Int           @default(0)
   expiryDate    DateTime?
   image         String?
   status        ProductStatus @default(ACTIVE)
