@@ -95,7 +95,7 @@ model Employee {
 
 model Customer {
   id           String     @id
-  name         String
+  name         String     @unique
   email        String?    @unique
   address      String?
   phone        String?    @unique

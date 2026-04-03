@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 import prisma from '../config/db';
 import { generateId } from '../util/generateId';
 
@@ -89,3 +90,4 @@ export const deleteCustomer = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Failed to delete customer', error: err });
   }
 };
+
