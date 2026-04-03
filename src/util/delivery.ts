@@ -17,8 +17,8 @@ export const createDeliveryService = async (data: CreateDeliveryDTO) => {
           data.items.map(async (item) => ({
             id: await generateId("deliveryItem"),
             productId: item.productId,
-            orderedQty: item.quantity,   // ← renamed
-            receivedQty: 0,              // ← starts at 0 until received
+            orderedQty: item.quantity,
+            receivedQty: 0,
             returnedQty: 0,
             costPrice: item.costPrice,
           }))
@@ -60,14 +60,39 @@ export const receiveDeliveryItemsService = async (
   receivedItems: { deliveryItemId: string; receivedQty: number }[]
 ) => {
   return await prisma.$transaction(async (tx) => {
+    // ✅ Ensure delivery exists
+    const delivery = await tx.delivery.findUnique({
+      where: { id: deliveryId },
+    });
+
+    if (!delivery) {
+      throw new Error("Delivery not found");
+    }
+
     for (const received of receivedItems) {
-      const deliveryItem = await tx.deliveryItem.findUnique({
-        where: { id: received.deliveryItemId },
+      const deliveryItem = await tx.deliveryItem.findFirst({
+        where: {
+          id: received.deliveryItemId,
+          deliveryId,
+        },
       });
 
-      if (!deliveryItem) throw new Error(`DeliveryItem ${received.deliveryItemId} not found`);
+      if (!deliveryItem) {
+        throw new Error(`DeliveryItem ${received.deliveryItemId} not found`);
+      }
 
-      // Update receivedQty on the delivery item
+      if (received.receivedQty <= 0) {
+        throw new Error("Received quantity must be greater than 0");
+      }
+
+      if (
+        received.receivedQty + deliveryItem.receivedQty >
+        deliveryItem.orderedQty
+      ) {
+        throw new Error("Received quantity exceeds ordered quantity");
+      }
+
+      // Update received quantity
       await tx.deliveryItem.update({
         where: { id: received.deliveryItemId },
         data: { receivedQty: { increment: received.receivedQty } },
@@ -79,13 +104,13 @@ export const receiveDeliveryItemsService = async (
         data: { stock: { increment: received.receivedQty } },
       });
 
-      // Log the stock movement
+      // Log inventory movement
       await tx.inventoryLog.create({
         data: {
           id: await generateId("inventoryLog"),
           productId: deliveryItem.productId,
           employeeId,
-          quantity: received.receivedQty,   // positive = stock in
+          quantity: received.receivedQty,
           type: "STOCK_IN",
           referenceId: deliveryId,
           referenceType: "DELIVERY",
@@ -93,10 +118,11 @@ export const receiveDeliveryItemsService = async (
       });
     }
 
-    // Check if all items are fully received → mark delivery as DELIVERED
-    // or partially received → PARTIALLY_RECEIVED
+    // Update delivery status
     const allItems = await tx.deliveryItem.findMany({ where: { deliveryId } });
-    const allFullyReceived = allItems.every((i) => i.receivedQty >= i.orderedQty);
+    const allFullyReceived = allItems.every(
+      (i) => i.receivedQty >= i.orderedQty
+    );
     const anyReceived = allItems.some((i) => i.receivedQty > 0);
 
     await tx.delivery.update({
