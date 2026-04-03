@@ -20,5 +20,17 @@ export const updateDeliverySchema = z.object({
   notes: z.string().optional(),
 });
 
+export const receiveDeliveryItemsSchema = z.object({
+  employeeId: z.string().min(1),
+  items: z.array(
+    z.object({
+      deliveryItemId: z.string().min(1),
+      receivedQty: z.number().int().positive(),
+    })
+  ),
+});
+
+
+export type ReceiveDeliveryItemsDTO = z.infer<typeof receiveDeliveryItemsSchema>;
 export type CreateDeliveryDTO = z.infer<typeof createDeliverySchema>;
 export type UpdateDeliveryDTO = z.infer<typeof updateDeliverySchema>;
