@@ -100,22 +100,18 @@ export const loginEmployee = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Employee not found' });
     }
 
-    if (employee.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'Access denied. Only ADMIN can login.' });
-    }
-
     if (employee.userStatus !== 'ACTIVE') {
       return res.status(403).json({ message: 'Account is inactive or suspended.' });
     }
 
     const isPasswordValid = await bcrypt.compare(password, employee.hashPassword);
-
     if (!isPasswordValid) {
       return res.status(401).json({ message: 'Invalid password' });
     }
 
+    // ✅ Allow all roles to log in, embed role in token
     const token = jwt.sign(
-      { id: employee.id, role: employee.role },
+      { id: employee.id, role: employee.role, status: employee.userStatus },
       process.env.JWT_SECRET || 'secret',
       { expiresIn: '1d' }
     );
