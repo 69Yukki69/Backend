@@ -64,19 +64,21 @@ export const updateDeliveryController = async (req: Request, res: Response) => {
 export const receiveDeliveryController = async (req: Request, res: Response) => {
   try {
     const parsed = receiveDeliveryItemsSchema.parse(req.body);
+
     const result = await receiveDeliveryItemsService(
       getId(req),
       parsed.employeeId,
       parsed.items
     );
+
     res.json(result);
-  }catch (error: any) {
-  console.error("RECEIVE DELIVERY ERROR:", error);
-  res.status(400).json({
-    message: error?.message || "Failed to receive delivery",
-    error,
-  });
-}
+  } catch (error) {
+    console.error("RECEIVE ERROR:", error); // 👈 ADD THIS
+
+    res.status(400).json({
+      message: error instanceof Error ? error.message : "Failed to receive delivery",
+    });
+  }
 };
 
 // DELETE /deliveries/:id
