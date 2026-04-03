@@ -80,10 +80,12 @@ export const receiveDeliveryController = async (req: Request, res: Response) => 
 };
 
 // DELETE /deliveries/:id
+// DELETE /deliveries/:id
 export const deleteDeliveryController = async (req: Request, res: Response) => {
   try {
     await deleteDeliveryService(getId(req));
-    res.status(204).send();
+    // Return JSON so frontend can parse it
+    res.json({ success: true, message: "Delivery deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete delivery" });
   }
