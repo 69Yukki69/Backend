@@ -90,4 +90,41 @@ export const deleteCustomer = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Failed to delete customer', error: err });
   }
 };
+// LOGIN customer
+export const loginCustomer = async (req: Request, res: Response) => {
+  try {
+    const { name, password } = req.body;
+
+    const customer = await prisma.customer.findFirst({
+      where: { name }
+    });
+
+    if (!customer) {
+      return res.status(404).json({ message: 'Customer not found' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, customer.hashPassword);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: 'Invalid password' });
+    }
+
+    const token = jwt.sign(
+      { id: customer.id, role: "CUSTOMER" },
+      process.env.JWT_SECRET || "secret",
+      { expiresIn: "1d" }
+    );
+
+    res.json({
+      message: "Login successful",
+      token,
+      customer: {
+        id: customer.id,
+        name: customer.name,
+        role: "CUSTOMER"
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to login", error: err });
+  }
+};
 
