@@ -70,9 +70,13 @@ export const receiveDeliveryController = async (req: Request, res: Response) => 
       parsed.items
     );
     res.json(result);
-  } catch (error) {
-    res.status(400).json({ message: error instanceof Error ? error.message : "Failed to receive delivery" });
-  }
+  }catch (error: any) {
+  console.error("RECEIVE DELIVERY ERROR:", error);
+  res.status(400).json({
+    message: error?.message || "Failed to receive delivery",
+    error,
+  });
+}
 };
 
 // DELETE /deliveries/:id
