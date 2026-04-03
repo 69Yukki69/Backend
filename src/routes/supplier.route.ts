@@ -7,14 +7,15 @@ import {
   deleteSupplier
 } from '../controllers/supplier.controller';
 import { validate } from '../middleware/validate';
+import { authMiddleware } from '../middleware/authMiddleware';
 import { CreateSupplierDto, UpdateSupplierDto } from '../dto/supplier.dto';
 
 const router = Router();
 
-router.get('/', getSuppliers);
-router.get('/:id', getSupplier);
-router.post('/', validate(CreateSupplierDto), createSupplier);
-router.put('/:id', validate(UpdateSupplierDto), updateSupplier);
-router.delete('/:id', deleteSupplier);
+router.get('/', authMiddleware(["ADMIN"]),getSuppliers);
+router.get('/:id', authMiddleware(["ADMIN"]),getSupplier);
+router.post('/', authMiddleware(["ADMIN"]),validate(CreateSupplierDto), createSupplier);
+router.put('/:id', authMiddleware(["ADMIN"]),validate(UpdateSupplierDto), updateSupplier);
+router.delete('/:id', authMiddleware(["ADMIN"]),deleteSupplier);
 
 export default router;
