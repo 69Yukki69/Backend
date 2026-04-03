@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider        = "prisma-client"
   previewFeatures = ["driverAdapters"]
@@ -12,6 +10,7 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
 // ==========================================
 // ENUMS
 // ==========================================
@@ -47,18 +46,22 @@ enum PaymentMethod {
 enum SaleStatus {
   PENDING
   COMPLETED
+  PARTIALLY_RETURNED
   CANCELLED
   REFUNDED
 }
 
 enum LogType {
-  STOCK_IN
-  STOCK_OUT
-  ADJUSTMENT
+  STOCK_IN        // delivery received → stock increases
+  STOCK_OUT       // sale completed → stock decreases
+  ADJUSTMENT      // manual correction
+  RETURN_IN       // customer return → stock increases
+  RETURN_OUT      // return to supplier → stock decreases
 }
 
 enum OrderStatus {
   PENDING
+  PARTIALLY_RECEIVED
   DELIVERED
   CANCELLED
 }
@@ -71,6 +74,10 @@ enum CategoryType {
   WATER
   OTHER
 }
+
+// ==========================================
+// MODELS
+// ==========================================
 
 model Employee {
   id           String     @id
@@ -93,7 +100,7 @@ model Customer {
   address      String?
   phone        String?    @unique
   hashPassword String
-  userStatus   UserStatus @default(ACTIVE)  // ← add this
+  userStatus   UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -114,23 +121,24 @@ model Supplier {
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
 
-  products     Product[]
-  deliveries   Delivery[]
+  products   Product[]
+  deliveries Delivery[]
 }
 
 model Product {
-  id            String        @id
-  productName   String
-  category      CategoryType  @default(SOFTDRINKS)
-  size          String?
-  barcode       String?       @unique
-  price         Float
-  expiryDate    DateTime?
-  image         String?
-  status        ProductStatus @default(ACTIVE)
-  supplierId    String
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id          String        @id
+  productName String
+  category    CategoryType  @default(SOFTDRINKS)
+  size        String?
+  barcode     String?       @unique
+  price       Float
+  stock       Int           @default(0) // current stock count — updated on every inventory event
+  expiryDate  DateTime?
+  image       String?
+  status      ProductStatus @default(ACTIVE)
+  supplierId  String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   supplier          Supplier          @relation(fields: [supplierId], references: [id])
   orderLines        OrderLine[]
@@ -151,10 +159,10 @@ model SaleRecord {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  employee    Employee   @relation(fields: [employeeId], references: [id])
-  customer    Customer?  @relation(fields: [customerId], references: [id])
-  orderLines  OrderLine[]
-  payment     Payment?
+  employee   Employee    @relation(fields: [employeeId], references: [id])
+  customer   Customer?   @relation(fields: [customerId], references: [id])
+  orderLines OrderLine[]
+  payment    Payment?
 }
 
 model OrderLine {
@@ -162,12 +170,13 @@ model OrderLine {
   saleId      String
   productId   String
   quantity    Int
-  price       Float
+  returnedQty Int      @default(0) // tracks per-item returns for partial refunds
+  price       Float                // price locked at time of sale
   subtotal    Float
   createdAt   DateTime @default(now())
 
-  saleRecord  SaleRecord @relation(fields: [saleId], references: [id])
-  product     Product    @relation(fields: [productId], references: [id])
+  saleRecord SaleRecord @relation(fields: [saleId], references: [id])
+  product    Product    @relation(fields: [productId], references: [id])
 }
 
 model Payment {
@@ -180,7 +189,7 @@ model Payment {
   paidAt         DateTime      @default(now())
   createdAt      DateTime      @default(now())
 
-  saleRecord     SaleRecord    @relation(fields: [saleId], references: [id])
+  saleRecord SaleRecord @relation(fields: [saleId], references: [id])
 }
 
 model ShoppingCart {
@@ -189,8 +198,8 @@ model ShoppingCart {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  customer   Customer          @relation(fields: [customerId], references: [id])
-  items      ShoppingCartItem[]
+  customer Customer          @relation(fields: [customerId], references: [id])
+  items    ShoppingCartItem[]
 }
 
 model ShoppingCartItem {
@@ -201,8 +210,8 @@ model ShoppingCartItem {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  shoppingCart   ShoppingCart @relation(fields: [shoppingCartId], references: [id])
-  product        Product      @relation(fields: [productId], references: [id])
+  shoppingCart ShoppingCart @relation(fields: [shoppingCartId], references: [id])
+  product      Product      @relation(fields: [productId], references: [id])
 }
 
 model PromotionSale {
@@ -217,20 +226,22 @@ model PromotionSale {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  product         Product  @relation(fields: [productId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
 }
 
 model InventoryLog {
-  id          String   @id
-  productId   String
-  employeeId  String
-  quantity    Int
-  type        LogType
-  reason      String?
-  createdAt   DateTime @default(now())
+  id            String   @id
+  productId     String
+  employeeId    String
+  quantity      Int      // positive = stock in, negative = stock out
+  type          LogType
+  reason        String?
+  referenceId   String?  // deliveryId or saleId that caused this movement
+  referenceType String?  // "DELIVERY" | "SALE" | "MANUAL"
+  createdAt     DateTime @default(now())
 
-  product     Product  @relation(fields: [productId], references: [id])
-  employee    Employee @relation(fields: [employeeId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+  employee Employee @relation(fields: [employeeId], references: [id])
 }
 
 model Delivery {
@@ -238,23 +249,25 @@ model Delivery {
   supplierId   String
   deliveryDate DateTime
   status       OrderStatus @default(PENDING)
-  totalItems   Int
+  totalItems   Int         // total ordered items count
   notes        String?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
-  supplier     Supplier      @relation(fields: [supplierId], references: [id])
-  items        DeliveryItem[]
+  supplier Supplier       @relation(fields: [supplierId], references: [id])
+  items    DeliveryItem[]
 }
 
 model DeliveryItem {
   id          String   @id
   deliveryId  String
   productId   String
-  quantity    Int
+  orderedQty  Int      // how many were ordered from supplier
+  receivedQty Int      @default(0) // how many actually arrived (for partial deliveries)
+  returnedQty Int      @default(0) // how many were sent back to supplier
   costPrice   Float
   createdAt   DateTime @default(now())
 
-  delivery    Delivery @relation(fields: [deliveryId], references: [id])
-  product     Product  @relation(fields: [productId], references: [id])
+  delivery Delivery @relation(fields: [deliveryId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
 }
