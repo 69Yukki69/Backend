@@ -100,6 +100,11 @@ export const loginEmployee = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Employee not found' });
     }
 
+    // ❌ Block Admins from logging in
+    if (employee.role === 'ADMIN') {
+      return res.status(403).json({ message: 'Admins are not allowed to log in.' });
+    }
+
     if (employee.userStatus !== 'ACTIVE') {
       return res.status(403).json({ message: 'Account is inactive or suspended.' });
     }
@@ -109,9 +114,58 @@ export const loginEmployee = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Invalid password' });
     }
 
-    // ✅ Allow all roles to log in, embed role in token
+    // ✅ Allow Cashier, Stock Manager, Customer
     const token = jwt.sign(
       { id: employee.id, role: employee.role, status: employee.userStatus },
+      process.env.JWT_SECRET || 'secret',
+      { expiresIn: '1d' }
+    );
+
+    res.json({
+      message: 'Login successful',
+      token,
+      employee: {
+        id: employee.id,
+        name: employee.name,
+        role: employee.role,
+        userStatus: employee.userStatus
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to login', error: err });
+  }
+};
+
+
+// LOGIN employee
+export const loginAdmin = async (req: Request, res: Response) => {
+  try {
+    const { name, password } = req.body;
+
+    const employee = await prisma.employee.findUnique({
+      where: { name }
+    });
+
+    if (!employee) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+
+    if (employee.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Access denied. Only ADMIN can login.' });
+    }
+
+    if (employee.userStatus !== 'ACTIVE') {
+      return res.status(403).json({ message: 'Account is inactive or suspended.' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, employee.hashPassword);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: 'Invalid password' });
+    }
+
+    const token = jwt.sign(
+      { id: employee.id, role: employee.role },
       process.env.JWT_SECRET || 'secret',
       { expiresIn: '1d' }
     );

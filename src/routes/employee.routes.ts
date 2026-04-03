@@ -5,7 +5,8 @@ import {
   createEmployee,
   updateEmployee,
   deleteEmployee,
-  loginEmployee
+  loginEmployee,
+  loginAdmin
 } from '../controllers/employee.controller';
 import { validate } from '../middleware/validate';
 import { authMiddleware } from '../middleware/authMiddleware';
@@ -19,5 +20,6 @@ router.get('/', authMiddleware(["ADMIN"]),getEmployees);
 router.get('/:id', getEmployee);
 router.put('/:id', authMiddleware(["ADMIN"]),validate(UpdateEmployeeDto), updateEmployee);
 router.delete('/:id', authMiddleware(["ADMIN"]),deleteEmployee);
+router.post('/login', validate(LoginEmployeeDto), loginAdmin);
 
 export default router;
