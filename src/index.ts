@@ -13,7 +13,7 @@ const corsOptions = {
   origin: [
     'http://localhost:3000',
     'http://localhost:3001',
-    'http://localhost:3002',
+    'http://c-c-delta.vercel.app',
     'https://my-app-phi-pearl-24.vercel.app',
   ],
   credentials: true,
