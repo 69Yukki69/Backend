@@ -20,6 +20,6 @@ router.get('/', authMiddleware(["ADMIN"]),getEmployees);
 router.get('/:id', getEmployee);
 router.put('/:id', authMiddleware(["ADMIN"]),validate(UpdateEmployeeDto), updateEmployee);
 router.delete('/:id', authMiddleware(["ADMIN"]),deleteEmployee);
-router.post('/login', validate(LoginEmployeeDto), loginAdmin);
+router.post('/login-admin', validate(LoginEmployeeDto), loginAdmin);
 
 export default router;
