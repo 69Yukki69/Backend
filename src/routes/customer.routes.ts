@@ -18,6 +18,6 @@ router.get('/:id', getCustomer);
 router.post('/', authMiddleware(["ADMIN"]), validate(CreateCustomerDto), createCustomer);
 router.put('/:id',authMiddleware(["ADMIN"]), validate(UpdateCustomerDto), updateCustomer);
 router.delete('/:id',authMiddleware(["ADMIN", "CUSTOMER"]), deleteCustomer);
-router.post('/login', validate(LoginCustomerDto), loginCustomer)
+router.post('/login-customer', validate(LoginCustomerDto), loginCustomer)
 
 export default router;
