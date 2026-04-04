@@ -38,7 +38,7 @@ export const createEmployee = async (req: Request, res: Response) => {
   try {
     const { name, password, role, phone } = req.body;
 
-    const id = await generateId('employee');  // ← EMP-1000, EMP-1001...
+    const id = await generateId('employee');
     const hashPassword = await bcrypt.hash(password, 10);
 
     const employee = await prisma.employee.create({
@@ -49,7 +49,6 @@ export const createEmployee = async (req: Request, res: Response) => {
         role,
         phone,
         userStatus: 'ACTIVE'
-
       }
     });
 
@@ -100,7 +99,6 @@ export const loginEmployee = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Employee not found' });
     }
 
-    // ❌ Block Admins from logging in
     if (employee.role === 'ADMIN') {
       return res.status(403).json({ message: 'Admins are not allowed to log in.' });
     }
@@ -114,7 +112,6 @@ export const loginEmployee = async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Invalid password' });
     }
 
-    // ✅ Allow Cashier, Stock Manager, Customer
     const token = jwt.sign(
       { id: employee.id, role: employee.role, status: employee.userStatus },
       process.env.JWT_SECRET || 'secret',
@@ -136,8 +133,7 @@ export const loginEmployee = async (req: Request, res: Response) => {
   }
 };
 
-
-// LOGIN employee
+// LOGIN admin
 export const loginAdmin = async (req: Request, res: Response) => {
   try {
     const { name, password } = req.body;
@@ -159,13 +155,12 @@ export const loginAdmin = async (req: Request, res: Response) => {
     }
 
     const isPasswordValid = await bcrypt.compare(password, employee.hashPassword);
-
     if (!isPasswordValid) {
       return res.status(401).json({ message: 'Invalid password' });
     }
 
     const token = jwt.sign(
-      { id: employee.id, role: employee.role },
+      { id: employee.id, role: employee.role, status: employee.userStatus }, // ✅ added status
       process.env.JWT_SECRET || 'secret',
       { expiresIn: '1d' }
     );
