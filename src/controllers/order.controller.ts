@@ -176,3 +176,20 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     res.status(500).json({ message: err?.message || 'Failed to update status.' });
   }
 };
+export const getAllCompletedOrders = async (req: Request, res: Response) => {
+  try {
+    const sales = await prisma.saleRecord.findMany({
+      where: { status: 'COMPLETED' },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        customer: true,
+        employee: true,
+        orderLines: { include: { product: true } },
+        payment: true,
+      },
+    });
+    res.json(sales);
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Failed to fetch completed orders.' });
+  }
+};
