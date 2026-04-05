@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { placeOrder , getCustomerOrders, updateOrderStatus, getAllCompletedOrders } from '../controllers/order.controller';
+import { placeOrder , getCustomerOrders, updateOrderStatus, getAllCompletedOrders, getActiveOrders } from '../controllers/order.controller';
 import { validate } from '../middleware/validate';
 import { PlaceOrderDto } from '../dto/order.dto';
 import { authMiddleware } from '../middleware/authMiddleware';
@@ -10,6 +10,7 @@ router.post('/', authMiddleware(['CUSTOMER']), validate(PlaceOrderDto), placeOrd
 router.get('/customer/:customerId', authMiddleware(['CUSTOMER']), getCustomerOrders);
 router.patch('/:id/status', authMiddleware(['CUSTOMER']), updateOrderStatus);
 router.get('/completed', authMiddleware(['ADMIN', 'CASHIER']), getAllCompletedOrders);
+router.get('/active', authMiddleware(['ADMIN', 'CASHIER']), getActiveOrders);
 
 
  

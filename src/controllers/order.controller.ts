@@ -193,3 +193,19 @@ export const getAllCompletedOrders = async (req: Request, res: Response) => {
     res.status(500).json({ message: err?.message || 'Failed to fetch completed orders.' });
   }
 };
+export const getActiveOrders = async (req: Request, res: Response) => {
+  try {
+    const sales = await prisma.saleRecord.findMany({
+      where: { status: { in: ['PENDING', 'PROCESSING', 'OUT_FOR_DELIVERY'] } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        customer: true,
+        employee: true,
+        orderLines: { include: { product: true } },
+      },
+    });
+    res.json(sales);
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Failed to fetch orders.' });
+  }
+};
