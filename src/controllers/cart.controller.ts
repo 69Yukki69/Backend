@@ -2,18 +2,62 @@ import { Request, Response } from 'express';
 import prisma from '../config/db';
 import { generateId } from '../util/generateId';
 
+const now = () => new Date();
+
+const activePromoWhere = () => ({
+  isActive: true,
+  dateEffective: { lte: now() },
+  lastDate: { gte: now() },
+});
+
+const productWithPromo = () => ({
+  include: {
+    promotionSales: {
+      where: activePromoWhere(),
+      take: 1,
+    },
+  },
+});
+
+const itemsWithPromo = () => ({
+  include: {
+    product: productWithPromo(),
+  },
+});
+
+// ── Shape a single cart item: flatten alteredPrice → finalPrice ──────────────
+const shapeItem = (item: any) => {
+  const activePromo = item.product?.promotionSales?.[0];
+  return {
+    ...item,
+    product: {
+      ...item.product,
+      finalPrice: activePromo ? activePromo.alteredPrice : item.product.price,
+      promotionSales: undefined,
+    },
+  };
+};
+
+// ── Shape a full cart ────────────────────────────────────────────────────────
+const shapeCart = (cart: any) => ({
+  ...cart,
+  items: cart.items.map(shapeItem),
+});
+
 // ── Helper: get or create a cart for a customer ──────────────────────────────
 const getOrCreateCart = async (customerId: string) => {
+  const include = { items: itemsWithPromo() };
+
   let cart = await prisma.shoppingCart.findUnique({
     where: { customerId },
-    include: { items: { include: { product: true } } }
+    include,
   });
 
   if (!cart) {
     const id = await generateId('shoppingCart');
     cart = await prisma.shoppingCart.create({
       data: { id, customerId },
-      include: { items: { include: { product: true } } }
+      include,
     });
   }
 
@@ -29,7 +73,7 @@ export const getCart = async (req: Request, res: Response) => {
     if (!customer) return res.status(404).json({ message: 'Customer not found' });
 
     const cart = await getOrCreateCart(customerId);
-    res.json(cart);
+    res.json(shapeCart(cart));
   } catch (err) {
     res.status(500).json({ message: 'Failed to get cart', error: err });
   }
@@ -51,7 +95,7 @@ export const addCartItem = async (req: Request, res: Response) => {
     const cart = await getOrCreateCart(customerId);
 
     const existingItem = await prisma.shoppingCartItem.findFirst({
-      where: { shoppingCartId: cart.id, productId: String(productId) }
+      where: { shoppingCartId: cart.id, productId: String(productId) },
     });
 
     if (existingItem) {
@@ -62,18 +106,18 @@ export const addCartItem = async (req: Request, res: Response) => {
       const updated = await prisma.shoppingCartItem.update({
         where: { id: String(existingItem.id) },
         data: { quantity: newQty },
-        include: { product: true }
+        include: { product: productWithPromo() },
       });
-      return res.json(updated);
+      return res.json(shapeItem(updated));
     }
 
     const id = await generateId('shoppingCartItem');
     const item = await prisma.shoppingCartItem.create({
       data: { id, shoppingCartId: cart.id, productId: String(productId), quantity },
-      include: { product: true }
+      include: { product: productWithPromo() },
     });
 
-    res.json(item);
+    res.json(shapeItem(item));
   } catch (err) {
     res.status(500).json({ message: 'Failed to add item to cart', error: err });
   }
@@ -85,10 +129,9 @@ export const updateCartItem = async (req: Request, res: Response) => {
     const itemId = String(req.params.itemId);
     const { quantity } = req.body;
 
-    // ✅ include product so item.product exists
     const item = await prisma.shoppingCartItem.findUnique({
       where: { id: itemId },
-      include: { product: true }
+      include: { product: true },
     });
     if (!item) return res.status(404).json({ message: 'Cart item not found' });
 
@@ -99,10 +142,10 @@ export const updateCartItem = async (req: Request, res: Response) => {
     const updated = await prisma.shoppingCartItem.update({
       where: { id: itemId },
       data: { quantity },
-      include: { product: true }
+      include: { product: productWithPromo() },
     });
 
-    res.json(updated);
+    res.json(shapeItem(updated));
   } catch (err) {
     res.status(500).json({ message: 'Failed to update cart item', error: err });
   }
