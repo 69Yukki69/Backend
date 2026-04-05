@@ -166,12 +166,12 @@ model SaleRecord {
 }
 
 model OrderLine {
-  id          String   @id
+  id          String   @id @default(cuid()) // ✅ FIXED
   saleId      String
   productId   String
   quantity    Int
-  returnedQty Int      @default(0) // tracks per-item returns for partial refunds
-  price       Float                // price locked at time of sale
+  returnedQty Int      @default(0)
+  price       Float
   subtotal    Float
   createdAt   DateTime @default(now())
 
