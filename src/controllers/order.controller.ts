@@ -145,3 +145,16 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
     res.status(500).json({ message: err?.message || 'Failed to fetch orders.' });
   }
 };
+export const updateOrderStatus = async (req: Request, res: Response) => {
+  const { id } = req.params as { id:string };
+  const { status } = req.body;
+  try {
+    const sale = await prisma.saleRecord.update({
+      where: { id },
+      data: { status },
+    });
+    res.json(sale);
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Failed to update status.' });
+  }
+};
