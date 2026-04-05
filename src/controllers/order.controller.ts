@@ -111,4 +111,37 @@ export const placeOrder = async (req: Request, res: Response) => {
       message: err?.message || 'Failed to place order.',
     });
   }
+  
+};
+export const getCustomerOrders = async (req: Request, res: Response) => {
+  const { customerId } = req.params as { customerId: string };
+
+  try {
+    const sales = await prisma.saleRecord.findMany({
+      where: { customerId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        orderLines: {
+          include: { product: true },
+        },
+      },
+    });
+
+    const orders = sales.map((sale) => ({
+      id: sale.id,
+      orderId: sale.id,
+      status: sale.status,
+      createdAt: sale.createdAt,
+      totalAmount: sale.totalAmount,
+      items: sale.orderLines.map((line: { product: { productName: string }; quantity: number; price: number }) => ({
+        name: line.product.productName,
+        qty: line.quantity,
+        price: line.price,
+      })),
+    }));
+
+    res.json(orders);
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Failed to fetch orders.' });
+  }
 };
