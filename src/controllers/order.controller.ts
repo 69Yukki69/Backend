@@ -57,24 +57,21 @@ export const placeOrder = async (req: Request, res: Response) => {
 
       // ── 5. Create OrderLines + deduct stock ──────────────────────────────
       for (const item of items) {
-        const orderLineId = await generateId('orderLine');
-
         await tx.orderLine.create({
-          data: {
-            id:        orderLineId,
+            data: {
             saleId:    sale.id,
             productId: item.productId,
             quantity:  item.quantity,
             price:     item.price,
             subtotal:  item.price * item.quantity,
-          },
+            },
         });
 
         await tx.product.update({
-          where: { id: item.productId },
-          data:  { stock: { decrement: item.quantity } },
+            where: { id: item.productId },
+            data:  { stock: { decrement: item.quantity } },
         });
-      }
+        }
 
       // ── 6. Create Payment ────────────────────────────────────────────────
       const paymentId = await generateId('payment');
