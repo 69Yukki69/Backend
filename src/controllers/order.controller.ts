@@ -30,7 +30,6 @@ export const placeOrder = async (req: Request, res: Response) => {
       }
 
       // ── 2. Find any active employee to attach (system/online order) ──────
-      // Adjust this logic if you have a specific "online" employee record
       const employee = await tx.employee.findFirst();
       if (!employee) {
         throw new Error('No employee found to attach the order to.');
@@ -58,20 +57,20 @@ export const placeOrder = async (req: Request, res: Response) => {
       // ── 5. Create OrderLines + deduct stock ──────────────────────────────
       for (const item of items) {
         await tx.orderLine.create({
-            data: {
+          data: {
             saleId:    sale.id,
             productId: item.productId,
             quantity:  item.quantity,
             price:     item.price,
             subtotal:  item.price * item.quantity,
-            },
+          },
         });
 
         await tx.product.update({
-            where: { id: item.productId },
-            data:  { stock: { decrement: item.quantity } },
+          where: { id: item.productId },
+          data:  { stock: { decrement: item.quantity } },
         });
-        }
+      }
 
       // ── 6. Create Payment ────────────────────────────────────────────────
       const paymentId = await generateId('payment');
@@ -111,8 +110,8 @@ export const placeOrder = async (req: Request, res: Response) => {
       message: err?.message || 'Failed to place order.',
     });
   }
-  
 };
+
 export const getCustomerOrders = async (req: Request, res: Response) => {
   const { customerId } = req.params as { customerId: string };
 
@@ -145,6 +144,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
     res.status(500).json({ message: err?.message || 'Failed to fetch orders.' });
   }
 };
+
 export const updateOrderStatus = async (req: Request, res: Response) => {
   const { id } = req.params as { id: string };
   const { status } = req.body;
@@ -176,6 +176,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     res.status(500).json({ message: err?.message || 'Failed to update status.' });
   }
 };
+
 export const getAllCompletedOrders = async (req: Request, res: Response) => {
   try {
     const sales = await prisma.saleRecord.findMany({
@@ -193,10 +194,15 @@ export const getAllCompletedOrders = async (req: Request, res: Response) => {
     res.status(500).json({ message: err?.message || 'Failed to fetch completed orders.' });
   }
 };
+
 export const getActiveOrders = async (req: Request, res: Response) => {
   try {
     const sales = await prisma.saleRecord.findMany({
-      where: { status: { in: ['PENDING', 'PROCESSING', 'OUT_FOR_DELIVERY'] } },
+      where: {
+        status: {
+          notIn: ['COMPLETED', 'CANCELLED', 'REFUNDED', 'PARTIALLY_RETURNED'],
+        },
+      },
       orderBy: { createdAt: 'desc' },
       include: {
         customer: true,
