@@ -146,14 +146,32 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
   }
 };
 export const updateOrderStatus = async (req: Request, res: Response) => {
-  const { id } = req.params as { id:string };
+  const { id } = req.params as { id: string };
   const { status } = req.body;
+
   try {
-    const sale = await prisma.saleRecord.update({
-      where: { id },
-      data: { status },
+    const result = await prisma.$transaction(async (tx) => {
+      // If cancelling, restore stock first
+      if (status === 'CANCELLED') {
+        const orderLines = await tx.orderLine.findMany({
+          where: { saleId: id },
+        });
+
+        for (const line of orderLines) {
+          await tx.product.update({
+            where: { id: line.productId },
+            data: { stock: { increment: line.quantity } },
+          });
+        }
+      }
+
+      return await tx.saleRecord.update({
+        where: { id },
+        data: { status },
+      });
     });
-    res.json(sale);
+
+    res.json(result);
   } catch (err: any) {
     res.status(500).json({ message: err?.message || 'Failed to update status.' });
   }
