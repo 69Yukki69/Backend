@@ -18,11 +18,11 @@ const router = Router();
 router.get('/active', getActivePromos);
 
 // Admin only
-router.get('/',        authMiddleware(['ADMIN']), getPromos);
-router.get('/:id',     authMiddleware(['ADMIN']), getPromo);
-router.post('/',       authMiddleware(['ADMIN']), validate(CreatePromoDto), createPromo);
-router.put('/:id',     authMiddleware(['ADMIN']), validate(UpdatePromoDto), updatePromo);
-router.patch('/:id',   authMiddleware(['ADMIN']), togglePromo);
-router.delete('/:id',  authMiddleware(['ADMIN']), deletePromo);
+router.get('/',        authMiddleware(["ADMIN", "CASHIER", "CUSTOMER"]), getPromos);
+router.get('/:id',     authMiddleware(["ADMIN", "CASHIER", "CUSTOMER"]), getPromo);
+router.post('/',       authMiddleware(["ADMIN"]), validate(CreatePromoDto), createPromo);
+router.put('/:id',     authMiddleware(["ADMIN"]), validate(UpdatePromoDto), updatePromo);
+router.patch('/:id',   authMiddleware(["ADMIN"]), togglePromo);
+router.delete('/:id',  authMiddleware(["ADMIN"]), deletePromo);
 
 export default router;
