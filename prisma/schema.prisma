@@ -45,6 +45,8 @@ enum PaymentMethod {
 
 enum SaleStatus {
   PENDING
+  PROCESSING
+  OUT_FOR_DELIVERY
   COMPLETED
   PARTIALLY_RETURNED
   CANCELLED
