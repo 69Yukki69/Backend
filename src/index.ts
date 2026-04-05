@@ -8,6 +8,8 @@ import productRoute from './routes/product.routes';
 import deliveryRoute from './routes/delivery.routes';
 import cartRoutes from './routes/cart.routes';
 import promoRoutes from './routes/promo.routes';
+import orderRoutes from './routes/order.routes';
+
 
 const app = express();
 
@@ -41,6 +43,7 @@ app.use('/api/products', productRoute);
 app.use("/api/deliveries", deliveryRoute);
 app.use('/api/cart', cartRoutes);
 app.use('/api/promos', promoRoutes);
+app.use('/api/orders', orderRoutes);
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });
