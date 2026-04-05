@@ -7,11 +7,41 @@ export const getProducts = async (req: Request, res: Response) => {
   try {
     const products = await prisma.product.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { supplier: true }
+      include: { supplier: true,
+        promotionSales: true
+       }
     });
 
     const stockMap = await getStockMany(products.map(p => p.id));
-    const result = products.map(p => ({ ...p, stock: stockMap[p.id] ?? 0 }));
+        const result = products.map(p => {
+        const stock = stockMap[p.id] ?? 0;
+
+        let finalPrice = p.price;
+
+        const now = new Date();
+
+        const activePromo = p.promotionSales.find(ps =>
+          ps.isActive &&
+          now >= new Date(ps.dateEffective) &&
+          now <= new Date(ps.lastDate)
+        );
+        if (activePromo) {
+          if (activePromo.discountPercent) {
+            finalPrice = p.price - (p.price * activePromo.discountPercent) / 100;
+          } else {
+            finalPrice = activePromo.alteredPrice;
+          }
+
+          if (finalPrice < 0) finalPrice = 0;
+        }
+
+        return {
+          ...p,
+          stock,
+          finalPrice,
+          activePromo
+        };
+      });
 
     res.json(result);
   } catch (err) {
@@ -23,12 +53,40 @@ export const getProduct = async (req: Request, res: Response) => {
   try {
     const product = await prisma.product.findUnique({
       where: { id: String(req.params.id) },
-      include: { supplier: true }
+      include: { supplier: true,
+        promotionSales: true
+       }
     });
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
     const stock = await getStock(product.id);
-    res.json({ ...product, stock });
+
+    const now = new Date();
+
+    const activePromo = product.promotionSales.find(ps =>
+      ps.isActive &&
+      now >= new Date(ps.dateEffective) &&
+      now <= new Date(ps.lastDate)
+    );
+
+    let finalPrice = product.price;
+
+    if (activePromo) {
+      if (activePromo.discountPercent) {
+        finalPrice = product.price - (product.price * activePromo.discountPercent) / 100;
+      } else {
+        finalPrice = activePromo.alteredPrice;
+      }
+
+      if (finalPrice < 0) finalPrice = 0;
+    }
+
+    res.json({
+      ...product,
+      stock,
+      finalPrice,
+      activePromo
+    });
   } catch (err) {
     res.status(500).json({ message: 'Failed to get product', error: err });
   }
