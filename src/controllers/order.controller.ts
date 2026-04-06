@@ -21,6 +21,14 @@ export const placeOrder = async (req: Request, res: Response) => {
         }
       }
 
+      // ── Resolve employee ID: use requester if employee, else find default admin ──
+      let logEmployeeId = requester.role !== 'CUSTOMER' ? requester.id : null;
+      if (!logEmployeeId) {
+        const admin = await tx.employee.findFirst({ where: { role: 'ADMIN' } });
+        if (!admin) throw new Error('No admin employee found to process the order.');
+        logEmployeeId = admin.id;
+      }
+
       const totalAmount = items.reduce(
         (sum: number, i: { price: number; quantity: number }) => sum + i.price * i.quantity, 0
       );
@@ -50,7 +58,20 @@ export const placeOrder = async (req: Request, res: Response) => {
           data: { stock: { decrement: item.quantity } } as any,
         });
 
-        // ── No inventory log here — log is written when cashier marks COMPLETED ──
+        // ── Write STOCK_OUT log immediately ──
+        const logId = await generateId('inventoryLog');
+        await (tx.inventoryLog as any).create({
+          data: {
+            id: logId,
+            productId: item.productId,
+            employeeId: logEmployeeId,
+            quantity: -item.quantity,
+            type: 'STOCK_OUT',
+            reason: requester.role === 'CUSTOMER' ? 'Customer order placed' : 'Sale order placed',
+            referenceId: sale.id,
+            referenceType: 'SALE',
+          },
+        });
       }
 
       const paymentId = await generateId('payment');
@@ -153,16 +174,41 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // ── Restore stock when cancelling (no inventory log — cashier didn't process it) ──
+    // ── Restore stock + write RETURN_IN log when cancelling ──
     if (status === 'CANCELLED' && order.status !== 'CANCELLED') {
       await prisma.$transaction(async (tx) => {
         const lines = await tx.orderLine.findMany({ where: { saleId: id } });
+
+        // Resolve employee ID for log
+        let logEmployeeId = requester.role !== 'CUSTOMER' ? requester.id : null;
+        if (!logEmployeeId) {
+          const admin = await tx.employee.findFirst({ where: { role: 'ADMIN' } });
+          logEmployeeId = admin?.id ?? null;
+        }
+
         for (const line of lines) {
           await tx.product.update({
             where: { id: line.productId },
             data: { stock: { increment: line.quantity } } as any,
           });
+
+          if (logEmployeeId) {
+            const logId = await generateId('inventoryLog');
+            await (tx.inventoryLog as any).create({
+              data: {
+                id: logId,
+                productId: line.productId,
+                employeeId: logEmployeeId,
+                quantity: line.quantity,
+                type: 'RETURN_IN',
+                reason: requester.role === 'CUSTOMER' ? 'Order cancelled by customer' : 'Order cancelled by cashier',
+                referenceId: id,
+                referenceType: 'SALE',
+              },
+            });
+          }
         }
+
         await tx.saleRecord.update({ where: { id }, data: { status } });
       });
       return res.json({ message: 'Order cancelled and stock restored.' });
@@ -176,26 +222,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
       },
     });
-
-    // ── Write STOCK_OUT log when cashier marks order as COMPLETED ──
-    if (status === 'COMPLETED' && requester.role !== 'CUSTOMER') {
-      const lines = await prisma.orderLine.findMany({ where: { saleId: id } });
-      for (const line of lines) {
-        const logId = await generateId('inventoryLog');
-        await (prisma.inventoryLog as any).create({
-          data: {
-            id: logId,
-            productId: line.productId,
-            employeeId: requester.id,
-            quantity: -line.quantity,
-            type: 'STOCK_OUT',
-            reason: 'Customer order completed',
-            referenceId: id,
-            referenceType: 'SALE',
-          },
-        });
-      }
-    }
 
     res.json(updated);
   } catch (err: any) {
