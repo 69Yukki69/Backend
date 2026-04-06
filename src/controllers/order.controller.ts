@@ -5,6 +5,7 @@ import { generateId } from '../util/generateId';
 // ── POST /orders ─────────────────────────────────────────────────────────────
 export const placeOrder = async (req: Request, res: Response) => {
   const { customerId, paymentMethod, gcashRef, note, items } = req.body;
+  const requester = (req as any).user as { id: string; role: string };
 
   if (!customerId || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: 'Invalid order data.' });
@@ -20,8 +21,9 @@ export const placeOrder = async (req: Request, res: Response) => {
         }
       }
 
-      const employee = await tx.employee.findFirst();
-      if (!employee) throw new Error('No employee found to attach the order to.');
+      // ── Use the logged-in user's ID instead of findFirst() ──
+      const employee = await tx.employee.findUnique({ where: { id: requester.id } });
+      if (!employee) throw new Error('Logged-in user is not a valid employee.');
 
       const totalAmount = items.reduce(
         (sum: number, i: { price: number; quantity: number }) => sum + i.price * i.quantity, 0
@@ -53,7 +55,7 @@ export const placeOrder = async (req: Request, res: Response) => {
 
     res.status(201).json({ message: 'Order placed successfully.', saleId: result.id });
   } catch (err: any) {
-    const isKnown = err?.message?.includes('Insufficient stock') || err?.message?.includes('not found');
+    const isKnown = err?.message?.includes('Insufficient stock') || err?.message?.includes('not found') || err?.message?.includes('not a valid employee');
     res.status(isKnown ? 400 : 500).json({ message: err?.message || 'Failed to place order.' });
   }
 };
