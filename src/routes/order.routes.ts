@@ -12,7 +12,7 @@ router.get(  '/completed',            authMiddleware(['ADMIN', 'CASHIER', 'EMPLO
 router.get(  '/customer/:customerId', authMiddleware(['ADMIN', 'CASHIER', 'EMPLOYEE', 'CUSTOMER']),  getCustomerOrders);
 
 // ── Action routes ─────────────────────────────────────────────────────────────
-router.post( '/',           authMiddleware(['CUSTOMER']),                              validate(PlaceOrderDto),          placeOrder);
+router.post( '/',           authMiddleware(['CUSTOMER', "CASHIER"]),                              validate(PlaceOrderDto),          placeOrder);
 router.patch('/:id/status', authMiddleware(['ADMIN', 'CASHIER', 'EMPLOYEE', 'CUSTOMER']), validate(UpdateOrderStatusDto), updateOrderStatus);
 
 export default router;
