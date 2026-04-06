@@ -13,7 +13,7 @@ import { authMiddleware } from '../middleware/authMiddleware';
 
 const router = Router();
 
-router.get('/', authMiddleware(["ADMIN"]), getCustomers);
+router.get('/', authMiddleware(["ADMIN", "CASHIER"]), getCustomers);
 router.get('/:id', getCustomer);
 router.post('/', authMiddleware(["ADMIN"]), validate(CreateCustomerDto), createCustomer);
 router.put('/:id',authMiddleware(["ADMIN"]), validate(UpdateCustomerDto), updateCustomer);
