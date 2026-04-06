@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/db';
 import { generateId } from '../util/generateId';
+import { createInventoryLog } from '../util/inventoryLogs';
 
 // ── POST /orders ─────────────────────────────────────────────────────────────
 export const placeOrder = async (req: Request, res: Response) => {
@@ -21,7 +22,6 @@ export const placeOrder = async (req: Request, res: Response) => {
         }
       }
 
-      // ── Resolve employee ID: use requester if employee, else find default admin ──
       let logEmployeeId = requester.role !== 'CUSTOMER' ? requester.id : null;
       if (!logEmployeeId) {
         const admin = await tx.employee.findFirst({ where: { role: 'ADMIN' } });
@@ -35,7 +35,6 @@ export const placeOrder = async (req: Request, res: Response) => {
 
       const saleId = await generateId('saleRecord');
 
-      // ── Customer places order: employeeId is null until a cashier completes it ──
       const sale = await tx.saleRecord.create({
         data: {
           id: saleId,
@@ -49,20 +48,23 @@ export const placeOrder = async (req: Request, res: Response) => {
 
       for (const item of items) {
         await tx.orderLine.create({
-          data: { saleId: sale.id, productId: item.productId, quantity: item.quantity, price: item.price, subtotal: item.price * item.quantity },
+          data: {
+            saleId: sale.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            price: item.price,
+            subtotal: item.price * item.quantity,
+          },
         });
 
-        // ── Decrement product stock ──
         await tx.product.update({
           where: { id: item.productId },
           data: { stock: { decrement: item.quantity } } as any,
         });
 
-        // ── Write STOCK_OUT log immediately ──
-        const logId = await generateId('inventoryLog');
-        await (tx.inventoryLog as any).create({
-          data: {
-            id: logId,
+        // ✅ Pass tx into createInventoryLog — no nested transaction, no ID collision
+        await createInventoryLog(
+          {
             productId: item.productId,
             employeeId: logEmployeeId,
             quantity: -item.quantity,
@@ -71,13 +73,22 @@ export const placeOrder = async (req: Request, res: Response) => {
             referenceId: sale.id,
             referenceType: 'SALE',
           },
-        });
+          tx
+        );
       }
 
       const paymentId = await generateId('payment');
-      const method    = paymentMethod === 'gcash' ? 'GCASH' : 'CASH';
+      const method = paymentMethod === 'gcash' ? 'GCASH' : 'CASH';
       await tx.payment.create({
-        data: { id: paymentId, saleId: sale.id, amount: totalAmount, method, amountTendered: method === 'CASH' ? totalAmount : null, change: method === 'CASH' ? 0 : null, paidAt: new Date() },
+        data: {
+          id: paymentId,
+          saleId: sale.id,
+          amount: totalAmount,
+          method,
+          amountTendered: method === 'CASH' ? totalAmount : null,
+          change: method === 'CASH' ? 0 : null,
+          paidAt: new Date(),
+        },
       });
 
       const cart = await tx.shoppingCart.findUnique({ where: { customerId } });
@@ -164,7 +175,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     const order = await prisma.saleRecord.findUnique({ where: { id } });
     if (!order) return res.status(404).json({ message: 'Order not found.' });
 
-    // Customers can only update their own orders, and only to COMPLETED or CANCELLED
     if (requester.role === 'CUSTOMER') {
       if (order.customerId !== requester.id) {
         return res.status(403).json({ message: 'You can only update your own orders.' });
@@ -174,12 +184,10 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // ── Restore stock + write RETURN_IN log when cancelling ──
     if (status === 'CANCELLED' && order.status !== 'CANCELLED') {
       await prisma.$transaction(async (tx) => {
         const lines = await tx.orderLine.findMany({ where: { saleId: id } });
 
-        // Resolve employee ID for log
         let logEmployeeId = requester.role !== 'CUSTOMER' ? requester.id : null;
         if (!logEmployeeId) {
           const admin = await tx.employee.findFirst({ where: { role: 'ADMIN' } });
@@ -193,10 +201,9 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           });
 
           if (logEmployeeId) {
-            const logId = await generateId('inventoryLog');
-            await (tx.inventoryLog as any).create({
-              data: {
-                id: logId,
+            // ✅ Pass tx — reuses existing transaction, no ID collision
+            await createInventoryLog(
+              {
                 productId: line.productId,
                 employeeId: logEmployeeId,
                 quantity: line.quantity,
@@ -205,7 +212,8 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
                 referenceId: id,
                 referenceType: 'SALE',
               },
-            });
+              tx
+            );
           }
         }
 
@@ -214,7 +222,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       return res.json({ message: 'Order cancelled and stock restored.' });
     }
 
-    // ── Assign cashier when they action the order ──
     const updated = await prisma.saleRecord.update({
       where: { id },
       data: {
