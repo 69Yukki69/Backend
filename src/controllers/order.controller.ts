@@ -38,7 +38,27 @@ export const placeOrder = async (req: Request, res: Response) => {
         await tx.orderLine.create({
           data: { saleId: sale.id, productId: item.productId, quantity: item.quantity, price: item.price, subtotal: item.price * item.quantity },
         });
-        await tx.product.update({ where: { id: item.productId }, data: { stock: { decrement: item.quantity } } });
+
+        // ── Decrement product stock ──
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { stock: { decrement: item.quantity } },
+        });
+
+        // ── Write STOCK_OUT log ──
+        const logId = await generateId('inventoryLog');
+        await tx.inventoryLog.create({
+          data: {
+            id: logId,
+            productId: item.productId,
+            employeeId: employee.id,
+            quantity: -item.quantity,   // negative = stock out
+            type: 'STOCK_OUT',
+            reason: 'Sale order placed',
+            referenceId: sale.id,
+            referenceType: 'SALE',
+          },
+        });
       }
 
       const paymentId = await generateId('payment');
@@ -141,13 +161,34 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // Restore stock when cancelling
+    // ── Restore stock + write RETURN_IN log when cancelling ──
     if (status === 'CANCELLED' && order.status !== 'CANCELLED') {
       await prisma.$transaction(async (tx) => {
         const lines = await tx.orderLine.findMany({ where: { saleId: id } });
+
         for (const line of lines) {
-          await tx.product.update({ where: { id: line.productId }, data: { stock: { increment: line.quantity } } });
+          // Restore stock
+          await tx.product.update({
+            where: { id: line.productId },
+            data: { stock: { increment: line.quantity } },
+          });
+
+          // Write RETURN_IN log (cancelled order returns stock)
+          const logId = await generateId('inventoryLog');
+          await tx.inventoryLog.create({
+            data: {
+              id: logId,
+              productId: line.productId,
+              employeeId: requester.id,
+              quantity: line.quantity,    // positive = stock back in
+              type: 'RETURN_IN',
+              reason: 'Order cancelled — stock restored',
+              referenceId: id,
+              referenceType: 'SALE',
+            },
+          });
         }
+
         await tx.saleRecord.update({ where: { id }, data: { status } });
       });
       return res.json({ message: 'Order cancelled and stock restored.' });
