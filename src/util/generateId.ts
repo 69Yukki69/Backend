@@ -31,42 +31,51 @@ const prefixMap: Record<ModelName, string> = {
   deliveryItem:     'DLI',
 };
 
-const getLastRecord = async (model: ModelName) => {
+// A db client can be either the global prisma or a transaction (tx)
+type DbClient = typeof prisma;
+
+const getLastRecord = async (model: ModelName, db: DbClient) => {
   switch (model) {
     case 'employee':
-      return prisma.employee.findFirst({ orderBy: { id: 'desc' } });
+      return db.employee.findFirst({ orderBy: { id: 'desc' } });
     case 'customer':
-      return prisma.customer.findFirst({ orderBy: { id: 'desc' } });
+      return db.customer.findFirst({ orderBy: { id: 'desc' } });
     case 'supplier':
-      return prisma.supplier.findFirst({ orderBy: { id: 'desc' } });
+      return db.supplier.findFirst({ orderBy: { id: 'desc' } });
     case 'product':
-      return prisma.product.findFirst({ orderBy: { id: 'desc' } });
+      return db.product.findFirst({ orderBy: { id: 'desc' } });
     case 'saleRecord':
-      return prisma.saleRecord.findFirst({ orderBy: { id: 'desc' } });
+      return db.saleRecord.findFirst({ orderBy: { id: 'desc' } });
     case 'orderLine':
-      return prisma.orderLine.findFirst({ orderBy: { id: 'desc' } });
+      return db.orderLine.findFirst({ orderBy: { id: 'desc' } });
     case 'payment':
-      return prisma.payment.findFirst({ orderBy: { id: 'desc' } });
+      return db.payment.findFirst({ orderBy: { id: 'desc' } });
     case 'shoppingCart':
-      return prisma.shoppingCart.findFirst({ orderBy: { id: 'desc' } });
+      return db.shoppingCart.findFirst({ orderBy: { id: 'desc' } });
     case 'shoppingCartItem':
-      return prisma.shoppingCartItem.findFirst({ orderBy: { id: 'desc' } });
+      return db.shoppingCartItem.findFirst({ orderBy: { id: 'desc' } });
     case 'promotionSale':
-      return prisma.promotionSale.findFirst({ orderBy: { id: 'desc' } });
+      return db.promotionSale.findFirst({ orderBy: { id: 'desc' } });
     case 'inventoryLog':
-      return prisma.inventoryLog.findFirst({ orderBy: { id: 'desc' } });
+      return db.inventoryLog.findFirst({ orderBy: { id: 'desc' } });
     case 'delivery':
-      return prisma.delivery.findFirst({ orderBy: { id: 'desc' } });
+      return db.delivery.findFirst({ orderBy: { id: 'desc' } });
     case 'deliveryItem':
-      return prisma.deliveryItem.findFirst({ orderBy: { id: 'desc' } });
+      return db.deliveryItem.findFirst({ orderBy: { id: 'desc' } });
     default:
       return null;
   }
 };
 
-export const generateId = async (model: ModelName): Promise<string> => {
+// Pass `tx` when calling inside a Prisma transaction so reads see
+// the latest uncommitted records, preventing duplicate ID collisions.
+export const generateId = async (
+  model: ModelName,
+  tx?: DbClient
+): Promise<string> => {
+  const db = tx ?? prisma;
   const prefix = prefixMap[model];
-  const last = await getLastRecord(model);
+  const last = await getLastRecord(model, db);
 
   if (!last) return `${prefix}-1000`;
 
