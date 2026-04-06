@@ -27,7 +27,7 @@ export const placeOrder = async (req: Request, res: Response) => {
 
       const saleId = await generateId('saleRecord');
 
-      // ── Customer places order: employeeId is null until a cashier approves ──
+      // ── Customer places order: employeeId is null until a cashier completes it ──
       const sale = await tx.saleRecord.create({
         data: {
           id: saleId,
@@ -50,22 +50,7 @@ export const placeOrder = async (req: Request, res: Response) => {
           data: { stock: { decrement: item.quantity } } as any,
         });
 
-        // ── Write STOCK_OUT log (only if an employee is placing the order) ──
-        if (requester.role !== 'CUSTOMER') {
-          const logId = await generateId('inventoryLog');
-          await (tx.inventoryLog as any).create({
-            data: {
-              id: logId,
-              productId: item.productId,
-              employeeId: requester.id,
-              quantity: -item.quantity,
-              type: 'STOCK_OUT',
-              reason: 'Sale order placed',
-              referenceId: sale.id,
-              referenceType: 'SALE',
-            },
-          });
-        }
+        // ── No inventory log here — log is written when cashier marks COMPLETED ──
       }
 
       const paymentId = await generateId('payment');
@@ -168,41 +153,22 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // ── Restore stock + write RETURN_IN log when cancelling ──
+    // ── Restore stock when cancelling (no inventory log — cashier didn't process it) ──
     if (status === 'CANCELLED' && order.status !== 'CANCELLED') {
       await prisma.$transaction(async (tx) => {
         const lines = await tx.orderLine.findMany({ where: { saleId: id } });
-
         for (const line of lines) {
           await tx.product.update({
             where: { id: line.productId },
             data: { stock: { increment: line.quantity } } as any,
           });
-
-          // Only write log if a cashier/admin is cancelling
-          if (requester.role !== 'CUSTOMER') {
-            const logId = await generateId('inventoryLog');
-            await (tx.inventoryLog as any).create({
-              data: {
-                id: logId,
-                productId: line.productId,
-                employeeId: requester.id,
-                quantity: line.quantity,
-                type: 'RETURN_IN',
-                reason: 'Order cancelled — stock restored',
-                referenceId: id,
-                referenceType: 'SALE',
-              },
-            });
-          }
         }
-
         await tx.saleRecord.update({ where: { id }, data: { status } });
       });
       return res.json({ message: 'Order cancelled and stock restored.' });
     }
 
-    // ── Assign cashier when they approve/action the order ──
+    // ── Assign cashier when they action the order ──
     const updated = await prisma.saleRecord.update({
       where: { id },
       data: {
@@ -210,6 +176,26 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
       },
     });
+
+    // ── Write STOCK_OUT log when cashier marks order as COMPLETED ──
+    if (status === 'COMPLETED' && requester.role !== 'CUSTOMER') {
+      const lines = await prisma.orderLine.findMany({ where: { saleId: id } });
+      for (const line of lines) {
+        const logId = await generateId('inventoryLog');
+        await (prisma.inventoryLog as any).create({
+          data: {
+            id: logId,
+            productId: line.productId,
+            employeeId: requester.id,
+            quantity: -line.quantity,
+            type: 'STOCK_OUT',
+            reason: 'Customer order completed',
+            referenceId: id,
+            referenceType: 'SALE',
+          },
+        });
+      }
+    }
 
     res.json(updated);
   } catch (err: any) {
