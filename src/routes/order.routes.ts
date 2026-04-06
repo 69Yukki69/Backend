@@ -4,7 +4,7 @@ import { validate } from '../middleware/validate';
 import { PlaceOrderDto, UpdateOrderStatusDto } from '../dto/order.dto';
 import { authMiddleware } from '../middleware/authMiddleware';
 
-const router = Router(); 
+const router = Router();  
 
 // ── Static routes FIRST (before any /:param routes) ──────────────────────────
 router.get(  '/active',               authMiddleware(['ADMIN', 'CASHIER', 'EMPLOYEE']),              getActiveOrders);
