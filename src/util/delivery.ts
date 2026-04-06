@@ -1,5 +1,5 @@
 import prisma from "../config/db";
-import { generateId } from "../util/generateId";
+import { generateId, generateIds } from "../util/generateId";
 import { CreateDeliveryDTO, UpdateDeliveryDTO } from "../dto/delivery.dto";
 
 export const createDeliveryService = async (data: CreateDeliveryDTO) => {
@@ -59,8 +59,12 @@ export const receiveDeliveryItemsService = async (
   employeeId: string,
   receivedItems: { deliveryItemId: string; receivedQty: number }[]
 ) => {
+  // ✅ Generate all log IDs in one batch BEFORE the transaction.
+  // generateIds() reads the current max numeric ID once, then increments
+  // locally — no DB reads inside the loop, no collision possible.
+  const logIds = await generateIds("inventoryLog", receivedItems.length);
+
   return await prisma.$transaction(async (tx) => {
-    // Ensure delivery exists
     const delivery = await tx.delivery.findUnique({
       where: { id: deliveryId },
     });
@@ -69,12 +73,11 @@ export const receiveDeliveryItemsService = async (
       throw new Error("Delivery not found");
     }
 
-    for (const received of receivedItems) {
+    for (let i = 0; i < receivedItems.length; i++) {
+      const received = receivedItems[i];
+
       const deliveryItem = await tx.deliveryItem.findFirst({
-        where: {
-          id: received.deliveryItemId,
-          deliveryId,
-        },
+        where: { id: received.deliveryItemId, deliveryId },
       });
 
       if (!deliveryItem) {
@@ -85,30 +88,23 @@ export const receiveDeliveryItemsService = async (
         throw new Error("Received quantity must be greater than 0");
       }
 
-      if (
-        received.receivedQty + deliveryItem.receivedQty >
-        deliveryItem.orderedQty
-      ) {
+      if (received.receivedQty + deliveryItem.receivedQty > deliveryItem.orderedQty) {
         throw new Error("Received quantity exceeds ordered quantity");
       }
 
-      // Update received quantity
       await tx.deliveryItem.update({
         where: { id: received.deliveryItemId },
         data: { receivedQty: { increment: received.receivedQty } },
       });
 
-      // Increase product stock
       await tx.product.update({
         where: { id: deliveryItem.productId },
         data: { stock: { increment: received.receivedQty } },
       });
 
-      // ✅ Pass `tx` so generateId reads within the transaction context,
-      // seeing the previously created log in this same loop iteration.
       await tx.inventoryLog.create({
         data: {
-          id: await generateId("inventoryLog", tx as any),
+          id: logIds[i], // pre-generated, guaranteed unique
           productId: deliveryItem.productId,
           employeeId,
           quantity: received.receivedQty,
@@ -119,11 +115,8 @@ export const receiveDeliveryItemsService = async (
       });
     }
 
-    // Update delivery status
     const allItems = await tx.deliveryItem.findMany({ where: { deliveryId } });
-    const allFullyReceived = allItems.every(
-      (i) => i.receivedQty >= i.orderedQty
-    );
+    const allFullyReceived = allItems.every((i) => i.receivedQty >= i.orderedQty);
     const anyReceived = allItems.some((i) => i.receivedQty > 0);
 
     await tx.delivery.update({

@@ -31,60 +31,52 @@ const prefixMap: Record<ModelName, string> = {
   deliveryItem:     'DLI',
 };
 
-// A db client can be either the global prisma or a transaction (tx)
-type DbClient = typeof prisma;
+const getLastNumber = async (model: ModelName): Promise<number> => {
+  let lastId: string | null = null;
 
-const getLastRecord = async (model: ModelName, db: DbClient) => {
   switch (model) {
-    case 'employee':
-      return db.employee.findFirst({ orderBy: { id: 'desc' } });
-    case 'customer':
-      return db.customer.findFirst({ orderBy: { id: 'desc' } });
-    case 'supplier':
-      return db.supplier.findFirst({ orderBy: { id: 'desc' } });
-    case 'product':
-      return db.product.findFirst({ orderBy: { id: 'desc' } });
-    case 'saleRecord':
-      return db.saleRecord.findFirst({ orderBy: { id: 'desc' } });
-    case 'orderLine':
-      return db.orderLine.findFirst({ orderBy: { id: 'desc' } });
-    case 'payment':
-      return db.payment.findFirst({ orderBy: { id: 'desc' } });
-    case 'shoppingCart':
-      return db.shoppingCart.findFirst({ orderBy: { id: 'desc' } });
-    case 'shoppingCartItem':
-      return db.shoppingCartItem.findFirst({ orderBy: { id: 'desc' } });
-    case 'promotionSale':
-      return db.promotionSale.findFirst({ orderBy: { id: 'desc' } });
-    case 'inventoryLog':
-      return db.inventoryLog.findFirst({ orderBy: { id: 'desc' } });
-    case 'delivery':
-      return db.delivery.findFirst({ orderBy: { id: 'desc' } });
-    case 'deliveryItem':
-      return db.deliveryItem.findFirst({ orderBy: { id: 'desc' } });
-    default:
-      return null;
+    case 'employee':         { const r = await prisma.employee.findMany({ select: { id: true } });         lastId = getMaxId(r); break; }
+    case 'customer':         { const r = await prisma.customer.findMany({ select: { id: true } });         lastId = getMaxId(r); break; }
+    case 'supplier':         { const r = await prisma.supplier.findMany({ select: { id: true } });         lastId = getMaxId(r); break; }
+    case 'product':          { const r = await prisma.product.findMany({ select: { id: true } });          lastId = getMaxId(r); break; }
+    case 'saleRecord':       { const r = await prisma.saleRecord.findMany({ select: { id: true } });       lastId = getMaxId(r); break; }
+    case 'orderLine':        { const r = await prisma.orderLine.findMany({ select: { id: true } });        lastId = getMaxId(r); break; }
+    case 'payment':          { const r = await prisma.payment.findMany({ select: { id: true } });          lastId = getMaxId(r); break; }
+    case 'shoppingCart':     { const r = await prisma.shoppingCart.findMany({ select: { id: true } });     lastId = getMaxId(r); break; }
+    case 'shoppingCartItem': { const r = await prisma.shoppingCartItem.findMany({ select: { id: true } }); lastId = getMaxId(r); break; }
+    case 'promotionSale':    { const r = await prisma.promotionSale.findMany({ select: { id: true } });    lastId = getMaxId(r); break; }
+    case 'inventoryLog':     { const r = await prisma.inventoryLog.findMany({ select: { id: true } });     lastId = getMaxId(r); break; }
+    case 'delivery':         { const r = await prisma.delivery.findMany({ select: { id: true } });         lastId = getMaxId(r); break; }
+    case 'deliveryItem':     { const r = await prisma.deliveryItem.findMany({ select: { id: true } });     lastId = getMaxId(r); break; }
   }
+
+  if (!lastId) return 1000;
+  const parts = lastId.split('-');
+  const num = parseInt(parts[parts.length - 1]);
+  return isNaN(num) ? 1000 : num;
 };
 
-// Pass `tx` when calling inside a Prisma transaction so reads see
-// the latest uncommitted records, preventing duplicate ID collisions.
-export const generateId = async (
-  model: ModelName,
-  tx?: DbClient
-): Promise<string> => {
-  const db = tx ?? prisma;
-  const prefix = prefixMap[model];
-  const last = await getLastRecord(model, db);
+// Finds the record with the highest numeric suffix — avoids lexicographic
+// ordering bugs where "LOG-1009" sorts after "LOG-10010" as a string.
+const getMaxId = (records: { id: string }[]): string | null => {
+  if (records.length === 0) return null;
+  return records.reduce((max, r) => {
+    const maxNum = parseInt(max.id.split('-').pop() || '0');
+    const rNum   = parseInt(r.id.split('-').pop()   || '0');
+    return rNum > maxNum ? r : max;
+  }).id;
+};
 
-  if (!last) return `${prefix}-1000`;
+// Generate `count` sequential IDs at once — safe for use before a transaction
+// because all reads happen in a single moment, then numbers are incremented locally.
+export const generateIds = async (model: ModelName, count: number): Promise<string[]> => {
+  const prefix  = prefixMap[model];
+  const lastNum = await getLastNumber(model);
+  return Array.from({ length: count }, (_, i) => `${prefix}-${lastNum + 1 + i}`);
+};
 
-  const parts = last.id.split('-');
-  const lastNumber = parseInt(parts[parts.length - 1]);
-
-  if (isNaN(lastNumber)) {
-    return `${prefix}-1000`;
-  }
-
-  return `${prefix}-${lastNumber + 1}`;
+// Single ID — backward compatible with all existing call sites
+export const generateId = async (model: ModelName): Promise<string> => {
+  const ids = await generateIds(model, 1);
+  return ids[0];
 };
