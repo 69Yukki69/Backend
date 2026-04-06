@@ -232,6 +232,7 @@ model PromotionSale {
 }
 
 model InventoryLog {
+  seq           Int      @unique @default(autoincrement())
   id            String   @id
   productId     String
   employeeId    String
