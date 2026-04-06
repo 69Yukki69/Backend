@@ -59,8 +59,17 @@ export const receiveDeliveryItemsService = async (
   employeeId: string,
   receivedItems: { deliveryItemId: string; receivedQty: number }[]
 ) => {
+  // ✅ Generate all inventory log IDs sequentially BEFORE the transaction.
+  // Inside a $transaction, new records aren't committed yet, so generateId()
+  // would read the same "last" record for every iteration and produce
+  // duplicate IDs — causing the "Unique constraint failed on ('id')" error.
+  const logIds: string[] = [];
+  for (const _ of receivedItems) {
+    logIds.push(await generateId("inventoryLog"));
+  }
+
   return await prisma.$transaction(async (tx) => {
-    // ✅ Ensure delivery exists
+    // Ensure delivery exists
     const delivery = await tx.delivery.findUnique({
       where: { id: deliveryId },
     });
@@ -69,7 +78,9 @@ export const receiveDeliveryItemsService = async (
       throw new Error("Delivery not found");
     }
 
-    for (const received of receivedItems) {
+    for (let i = 0; i < receivedItems.length; i++) {
+      const received = receivedItems[i];
+
       const deliveryItem = await tx.deliveryItem.findFirst({
         where: {
           id: received.deliveryItemId,
@@ -104,10 +115,10 @@ export const receiveDeliveryItemsService = async (
         data: { stock: { increment: received.receivedQty } },
       });
 
-      // Log inventory movement
+      // Log inventory movement — use pre-generated ID to avoid duplicate collision
       await tx.inventoryLog.create({
         data: {
-          id: await generateId("inventoryLog"),
+          id: logIds[i],
           productId: deliveryItem.productId,
           employeeId,
           quantity: received.receivedQty,
