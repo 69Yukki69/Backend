@@ -28,4 +28,12 @@ export const PlaceOrderDto = z.object({
   }
 );
 
-export type PlaceOrderType = z.infer<typeof PlaceOrderDto>;
+export const UpdateOrderStatusDto = z.object({
+  status: z.enum(
+    ['PENDING', 'PROCESSING', 'OUT_FOR_DELIVERY', 'COMPLETED', 'PARTIALLY_RETURNED', 'CANCELLED', 'REFUNDED'],
+    { error: 'Invalid order status' }
+  ),
+});
+
+export type PlaceOrderType        = z.infer<typeof PlaceOrderDto>;
+export type UpdateOrderStatusType = z.infer<typeof UpdateOrderStatusDto>;
