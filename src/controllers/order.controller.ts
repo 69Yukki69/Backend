@@ -16,22 +16,27 @@ export const placeOrder = async (req: Request, res: Response) => {
       for (const item of items) {
         const product = await tx.product.findUnique({ where: { id: item.productId } });
         if (!product) throw new Error(`Product not found: ${item.productId}`);
-        if (product.stock < item.quantity) {
-          throw new Error(`Insufficient stock for "${product.productName}". Only ${product.stock} left.`);
+        if ((product as any).stock < item.quantity) {
+          throw new Error(`Insufficient stock for "${product.productName}". Only ${(product as any).stock} left.`);
         }
       }
-
-      // ── Use the logged-in user's ID instead of findFirst() ──
-      const employee = await tx.employee.findUnique({ where: { id: requester.id } });
-      if (!employee) throw new Error('Logged-in user is not a valid employee.');
 
       const totalAmount = items.reduce(
         (sum: number, i: { price: number; quantity: number }) => sum + i.price * i.quantity, 0
       );
 
       const saleId = await generateId('saleRecord');
+
+      // ── Customer places order: employeeId is null until a cashier approves ──
       const sale = await tx.saleRecord.create({
-        data: { id: saleId, employeeId: employee.id, customerId: customerId || null, totalAmount, discount: 0, status: 'PENDING' },
+        data: {
+          id: saleId,
+          employeeId: requester.role === 'CUSTOMER' ? null : requester.id,
+          customerId: customerId || null,
+          totalAmount,
+          discount: 0,
+          status: 'PENDING',
+        },
       });
 
       for (const item of items) {
@@ -42,23 +47,25 @@ export const placeOrder = async (req: Request, res: Response) => {
         // ── Decrement product stock ──
         await tx.product.update({
           where: { id: item.productId },
-          data: { stock: { decrement: item.quantity } },
+          data: { stock: { decrement: item.quantity } } as any,
         });
 
-        // ── Write STOCK_OUT log ──
-        const logId = await generateId('inventoryLog');
-        await tx.inventoryLog.create({
-          data: {
-            id: logId,
-            productId: item.productId,
-            employeeId: employee.id,
-            quantity: -item.quantity,   // negative = stock out
-            type: 'STOCK_OUT',
-            reason: 'Sale order placed',
-            referenceId: sale.id,
-            referenceType: 'SALE',
-          },
-        });
+        // ── Write STOCK_OUT log (only if an employee is placing the order) ──
+        if (requester.role !== 'CUSTOMER') {
+          const logId = await generateId('inventoryLog');
+          await (tx.inventoryLog as any).create({
+            data: {
+              id: logId,
+              productId: item.productId,
+              employeeId: requester.id,
+              quantity: -item.quantity,
+              type: 'STOCK_OUT',
+              reason: 'Sale order placed',
+              referenceId: sale.id,
+              referenceType: 'SALE',
+            },
+          });
+        }
       }
 
       const paymentId = await generateId('payment');
@@ -75,7 +82,7 @@ export const placeOrder = async (req: Request, res: Response) => {
 
     res.status(201).json({ message: 'Order placed successfully.', saleId: result.id });
   } catch (err: any) {
-    const isKnown = err?.message?.includes('Insufficient stock') || err?.message?.includes('not found') || err?.message?.includes('not a valid employee');
+    const isKnown = err?.message?.includes('Insufficient stock') || err?.message?.includes('not found');
     res.status(isKnown ? 400 : 500).json({ message: err?.message || 'Failed to place order.' });
   }
 };
@@ -167,26 +174,27 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         const lines = await tx.orderLine.findMany({ where: { saleId: id } });
 
         for (const line of lines) {
-          // Restore stock
           await tx.product.update({
             where: { id: line.productId },
-            data: { stock: { increment: line.quantity } },
+            data: { stock: { increment: line.quantity } } as any,
           });
 
-          // Write RETURN_IN log (cancelled order returns stock)
-          const logId = await generateId('inventoryLog');
-          await tx.inventoryLog.create({
-            data: {
-              id: logId,
-              productId: line.productId,
-              employeeId: requester.id,
-              quantity: line.quantity,    // positive = stock back in
-              type: 'RETURN_IN',
-              reason: 'Order cancelled — stock restored',
-              referenceId: id,
-              referenceType: 'SALE',
-            },
-          });
+          // Only write log if a cashier/admin is cancelling
+          if (requester.role !== 'CUSTOMER') {
+            const logId = await generateId('inventoryLog');
+            await (tx.inventoryLog as any).create({
+              data: {
+                id: logId,
+                productId: line.productId,
+                employeeId: requester.id,
+                quantity: line.quantity,
+                type: 'RETURN_IN',
+                reason: 'Order cancelled — stock restored',
+                referenceId: id,
+                referenceType: 'SALE',
+              },
+            });
+          }
         }
 
         await tx.saleRecord.update({ where: { id }, data: { status } });
@@ -194,7 +202,15 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       return res.json({ message: 'Order cancelled and stock restored.' });
     }
 
-    const updated = await prisma.saleRecord.update({ where: { id }, data: { status } });
+    // ── Assign cashier when they approve/action the order ──
+    const updated = await prisma.saleRecord.update({
+      where: { id },
+      data: {
+        status,
+        ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
+      },
+    });
+
     res.json(updated);
   } catch (err: any) {
     res.status(500).json({ message: err?.message || 'Failed to update order status.' });

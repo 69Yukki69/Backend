@@ -152,7 +152,7 @@ model Product {
 
 model SaleRecord {
   id          String     @id
-  employeeId  String
+  employeeId  String?
   customerId  String?
   totalAmount Float
   discount    Float      @default(0)
@@ -161,7 +161,7 @@ model SaleRecord {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  employee   Employee    @relation(fields: [employeeId], references: [id])
+  employee   Employee?    @relation(fields: [employeeId], references: [id])
   customer   Customer?   @relation(fields: [customerId], references: [id])
   orderLines OrderLine[]
   payment    Payment?
