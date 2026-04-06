@@ -70,6 +70,12 @@ export const generateId = async (model: ModelName): Promise<string> => {
 
   if (!last) return `${prefix}-1000`;
 
-  const lastNumber = parseInt(last.id.split('-')[1]);
+  const parts = last.id.split('-');
+  const lastNumber = parseInt(parts[parts.length - 1]);
+
+  if (isNaN(lastNumber)) {
+    return `${prefix}-1000`;
+  }
+
   return `${prefix}-${lastNumber + 1}`;
 };
