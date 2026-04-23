@@ -12,7 +12,7 @@ import { CreateSupplierDto, UpdateSupplierDto } from '../dto/supplier.dto';
 
 const router = Router();
 
-router.get('/', authMiddleware(["ADMIN"]),getSuppliers);
+router.get('/', authMiddleware(["ADMIN", "STOCK_MANAGER"]),getSuppliers);
 router.get('/:id', authMiddleware(["ADMIN"]),getSupplier);
 router.post('/', authMiddleware(["ADMIN"]),validate(CreateSupplierDto), createSupplier);
 router.put('/:id', authMiddleware(["ADMIN"]),validate(UpdateSupplierDto), updateSupplier);
