@@ -85,11 +85,18 @@ export const addCartItem = async (req: Request, res: Response) => {
     const customerId = String(req.params.customerId);
     const { productId, quantity } = req.body;
 
+    // FIX 4: validate quantity
+    if (!quantity || quantity < 1) {
+      return res.status(400).json({ message: 'Quantity must be at least 1' });
+    }
+
     const product = await prisma.product.findUnique({ where: { id: String(productId) } });
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
-    if (product.stock < quantity) {
-      return res.status(400).json({ message: `Insufficient stock. Only ${product.stock} available.` });
+    // FIX 1: check available stock (stock minus already reserved)
+    const availableStock = product.stock - product.reservedStock;
+    if (availableStock < quantity) {
+      return res.status(400).json({ message: `Insufficient stock. Only ${availableStock} available.` });
     }
 
     const cart = await getOrCreateCart(customerId);
@@ -100,8 +107,9 @@ export const addCartItem = async (req: Request, res: Response) => {
 
     if (existingItem) {
       const newQty = existingItem.quantity + quantity;
-      if (product.stock < newQty) {
-        return res.status(400).json({ message: `Insufficient stock. Only ${product.stock} available.` });
+      // FIX 1: use availableStock for the combined quantity check too
+      if (availableStock < newQty) {
+        return res.status(400).json({ message: `Insufficient stock. Only ${availableStock} available.` });
       }
       const updated = await prisma.shoppingCartItem.update({
         where: { id: String(existingItem.id) },
@@ -124,10 +132,17 @@ export const addCartItem = async (req: Request, res: Response) => {
 };
 
 // UPDATE cart item quantity
+// Route should be: PATCH /cart/:customerId/items/:itemId
 export const updateCartItem = async (req: Request, res: Response) => {
   try {
+    const customerId = String(req.params.customerId);
     const itemId = String(req.params.itemId);
     const { quantity } = req.body;
+
+    // FIX 4: validate quantity
+    if (!quantity || quantity < 1) {
+      return res.status(400).json({ message: 'Quantity must be at least 1' });
+    }
 
     const item = await prisma.shoppingCartItem.findUnique({
       where: { id: itemId },
@@ -135,8 +150,16 @@ export const updateCartItem = async (req: Request, res: Response) => {
     });
     if (!item) return res.status(404).json({ message: 'Cart item not found' });
 
-    if (item.product.stock < quantity) {
-      return res.status(400).json({ message: `Insufficient stock. Only ${item.product.stock} available.` });
+    // FIX 2: verify item belongs to this customer's cart
+    const cart = await prisma.shoppingCart.findUnique({ where: { customerId } });
+    if (!cart || item.shoppingCartId !== cart.id) {
+      return res.status(403).json({ message: 'Item does not belong to this cart' });
+    }
+
+    // FIX 1: check available stock (stock minus already reserved)
+    const availableStock = item.product.stock - item.product.reservedStock;
+    if (availableStock < quantity) {
+      return res.status(400).json({ message: `Insufficient stock. Only ${availableStock} available.` });
     }
 
     const updated = await prisma.shoppingCartItem.update({
@@ -152,12 +175,20 @@ export const updateCartItem = async (req: Request, res: Response) => {
 };
 
 // REMOVE single item from cart
+// Route should be: DELETE /cart/:customerId/items/:itemId
 export const removeCartItem = async (req: Request, res: Response) => {
   try {
+    const customerId = String(req.params.customerId);
     const itemId = String(req.params.itemId);
 
     const item = await prisma.shoppingCartItem.findUnique({ where: { id: itemId } });
     if (!item) return res.status(404).json({ message: 'Cart item not found' });
+
+    // FIX 3: verify item belongs to this customer's cart
+    const cart = await prisma.shoppingCart.findUnique({ where: { customerId } });
+    if (!cart || item.shoppingCartId !== cart.id) {
+      return res.status(403).json({ message: 'Item does not belong to this cart' });
+    }
 
     await prisma.shoppingCartItem.delete({ where: { id: itemId } });
     res.json({ message: 'Item removed from cart' });

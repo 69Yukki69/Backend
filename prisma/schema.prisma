@@ -17,7 +17,7 @@ datasource db {
 
 enum Role {
   ADMIN
-  CASHIER
+  CASHIER	
   STOCK_MANAGER
 }
 
@@ -56,9 +56,18 @@ enum SaleStatus {
 enum LogType {
   STOCK_IN        // delivery received → stock increases
   STOCK_OUT       // sale completed → stock decreases
-  ADJUSTMENT      // manual correction
+  ADJUSTMENT      // manual correction (loss report)
   RETURN_IN       // customer return → stock increases
   RETURN_OUT      // return to supplier → stock decreases
+}
+
+// NEW: reason categories for loss/adjustment logs
+enum LossReason {
+  EXPIRED
+  DAMAGED
+  THEFT
+  COUNT_ERROR
+  OTHER
 }
 
 enum OrderStatus {
@@ -128,19 +137,21 @@ model Supplier {
 }
 
 model Product {
-  id          String        @id
-  productName String
-  category    CategoryType  @default(SOFTDRINKS)
-  size        String?
-  barcode     String?       @unique
-  price       Float
-  stock       Int           @default(0) // current stock count — updated on every inventory event
-  expiryDate  DateTime?
-  image       String?
-  status      ProductStatus @default(ACTIVE)
-  supplierId  String
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id            String        @id
+  productName   String
+  category      CategoryType  @default(SOFTDRINKS)
+  size          String?
+  barcode       String?       @unique
+  price         Float
+  stock         Int           @default(0)           // current available stock
+  reservedStock Int           @default(0)           // NEW: held by PENDING/PROCESSING orders
+  piecesPerCase Int           @default(1)           // NEW: pieces in one case (e.g. 12 for 750ml, 24 for 250ml)
+  expiryDate    DateTime?
+  image         String?
+  status        ProductStatus @default(ACTIVE)
+  supplierId    String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   supplier          Supplier          @relation(fields: [supplierId], references: [id])
   orderLines        OrderLine[]
@@ -161,18 +172,18 @@ model SaleRecord {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  employee   Employee?    @relation(fields: [employeeId], references: [id])
+  employee   Employee?   @relation(fields: [employeeId], references: [id])
   customer   Customer?   @relation(fields: [customerId], references: [id])
   orderLines OrderLine[]
   payment    Payment?
 }
 
 model OrderLine {
-  id          String   @id @default(cuid()) // ✅ FIXED
+  id          String   @id @default(cuid())
   saleId      String
   productId   String
-  quantity    Int
-  returnedQty Int      @default(0)
+  quantity    Int                // ordered in CASES
+  returnedQty Int      @default(0) // returned in PIECES (use product.piecesPerCase to convert)
   price       Float
   subtotal    Float
   createdAt   DateTime @default(now())
@@ -232,16 +243,17 @@ model PromotionSale {
 }
 
 model InventoryLog {
-  seq           Int      @unique @default(autoincrement())
-  id            String   @id
+  seq           Int        @unique @default(autoincrement())
+  id            String     @id
   productId     String
   employeeId    String
-  quantity      Int      // positive = stock in, negative = stock out
+  quantity      Int        // positive = stock in, negative = stock out
   type          LogType
   reason        String?
-  referenceId   String?  // deliveryId or saleId that caused this movement
-  referenceType String?  // "DELIVERY" | "SALE" | "MANUAL"
-  createdAt     DateTime @default(now())
+  lossReason    LossReason? // NEW: only set when type = ADJUSTMENT (loss report)
+  referenceId   String?    // deliveryId or saleId that caused this movement
+  referenceType String?    // "DELIVERY" | "SALE" | "MANUAL"
+  createdAt     DateTime   @default(now())
 
   product  Product  @relation(fields: [productId], references: [id])
   employee Employee @relation(fields: [employeeId], references: [id])
