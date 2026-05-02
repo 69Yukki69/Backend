@@ -1,5 +1,5 @@
 import prisma from '../config/db';
-import { LogType, Prisma } from '../generated/prisma/client';
+import { LogType,LossReason, Prisma } from '../generated/prisma/client';
 
 type CreateInventoryLogParams = {
   productId: string;
@@ -7,6 +7,7 @@ type CreateInventoryLogParams = {
   quantity: number;
   type: LogType;
   reason?: string;
+  lossReason?:   LossReason; 
   referenceId?: string;
   referenceType?: string;
 };
