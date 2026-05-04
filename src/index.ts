@@ -1,16 +1,16 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { ENV } from './config/env';
-import employeeRoute from './routes/employee.routes';
-import supplierRoute from './routes/supplier.route';
-import customerRoute from './routes/customer.routes';
-import productRoute from './routes/product.routes';
-import deliveryRoute from './routes/delivery.routes';
-import cartRoutes from './routes/cart.routes';
-import promoRoutes from './routes/promo.routes';
-import orderRoutes from './routes/order.routes';
-import inventoryRoutes from './routes/inventory.routes'
-
+import employeeRoute   from './routes/employee.routes';
+import supplierRoute   from './routes/supplier.route';
+import customerRoute   from './routes/customer.routes';
+import productRoute    from './routes/product.routes';
+import deliveryRoute   from './routes/delivery.routes';
+import cartRoutes      from './routes/cart.routes';
+import promoRoutes     from './routes/promo.routes';
+import orderRoutes     from './routes/order.routes';
+import inventoryRoutes from './routes/inventory.routes';
+import uploadRoutes    from './routes/upload.routes';    // NEW
 
 const app = express();
 
@@ -27,7 +27,6 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-
 app.use(express.json());
 
 app.use('/api', (req, res, next) => {
@@ -37,15 +36,16 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-app.use('/api/employees', employeeRoute);
-app.use('/api/suppliers', supplierRoute);
-app.use('/api/customers', customerRoute);
-app.use('/api/products', productRoute);
-app.use("/api/deliveries", deliveryRoute);
-app.use('/api/cart', cartRoutes);
-app.use('/api/promos', promoRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/inventory', inventoryRoutes);
+app.use('/api/employees',  employeeRoute);
+app.use('/api/suppliers',  supplierRoute);
+app.use('/api/customers',  customerRoute);
+app.use('/api/products',   productRoute);
+app.use('/api/deliveries', deliveryRoute);
+app.use('/api/cart',       cartRoutes);
+app.use('/api/promos',     promoRoutes);
+app.use('/api/orders',     orderRoutes);
+app.use('/api/inventory',  inventoryRoutes);
+app.use('/api/upload',     uploadRoutes);              // NEW
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });

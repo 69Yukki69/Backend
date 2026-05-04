@@ -1,48 +1,124 @@
 {
   
   "name": "backend",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-  "dev": "nodemon",
-  "build": "prisma generate && tsc",
-  "prestart": "prisma generate",
-  "start": "node dist/index.js",
-  "postinstall": "prisma generate"
-},
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "dependencies": {
-    "@clerk/express": "^1.0.1",
-    "@prisma/adapter-pg": "^7.5.0",
-    "@prisma/client": "^7.5.0",
-    "bcrypt": "^6.0.0",
-    "cors": "^2.8.6",
-    "dotenv": "^17.2.3",
-    "drizzle-orm": "^0.44.7",
-    "express": "^5.2.1",
-    "jsonwebtoken": "^9.0.3",
-    "pg": "^8.20.0",
-    "zod": "^4.3.6"
-  },
-  "devDependencies": {
-    "@types/bcrypt": "^6.0.0",
-    "@types/cors": "^2.8.19",
-    "@types/express": "^5.0.6",
-    "@types/jsonwebtoken": "^9.0.10",
-    "@types/pg": "^8.18.0",
-    "drizzle-kit": "^0.31.7",
-    "nodemon": "^3.1.11",
-    "prisma": "^7.5.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
-  },
-  "engines": {
-  "node": "20.x"
-}
-
   
+  "version": "1.0.0",
+  
+  "description": "",
+  
+  "main": "index.js",
+  
+  "scripts": {
+  
+    
+  "dev": "nodemon",
+  
+    
+  "build": "prisma generate && tsc",
+  
+    
+  "prestart": "prisma generate",
+  
+    
+  "start": "node dist/index.js",
+  
+    
+  "postinstall": "prisma generate"
+  
+  },
+  
+  "keywords": [],
+  
+  "author": "",
+  
+  "license": "ISC",
+  
+  "type": "commonjs",
+  
+  "dependencies": {
+  
+    
+  "@clerk/express": "^1.0.1",
+  
+    
+  "@prisma/adapter-pg": "^7.5.0",
+  
+    
+  "@prisma/client": "^7.5.0",
+  
+    
+  "bcrypt": "^6.0.0",
+  
+    
+  "cloudinary": "^2.10.0",
+  
+    
+  "cors": "^2.8.6",
+  
+    
+  "dotenv": "^17.2.3",
+  
+    
+  "drizzle-orm": "^0.44.7",
+  
+    
+  "express": "^5.2.1",
+  
+    
+  "jsonwebtoken": "^9.0.3",
+  
+    
+  "multer": "^2.1.1",
+  
+    
+  "pg": "^8.20.0",
+  
+    
+  "zod": "^4.3.6"
+  
+  },
+  
+  "devDependencies": {
+  
+    
+  "@types/bcrypt": "^6.0.0",
+  
+    
+  "@types/cors": "^2.8.19",
+  
+    
+  "@types/express": "^5.0.6",
+  
+    
+  "@types/jsonwebtoken": "^9.0.10",
+  
+    
+  "@types/multer": "^2.1.0",
+  
+    
+  "@types/pg": "^8.18.0",
+  
+    
+  "drizzle-kit": "^0.31.7",
+  
+    
+  "nodemon": "^3.1.11",
+  
+    
+  "prisma": "^7.5.0",
+  
+    
+  "ts-node": "^10.9.2",
+  
+    
+  "typescript": "^5.9.3"
+  
+  },
+  
+  "engines": {
+  
+    
+  "node": "20.x"
+  
+  }
 }

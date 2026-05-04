@@ -69,7 +69,6 @@ enum LossReason {
   OTHER
 }
 
-// Reason a customer provides when filing a return request
 enum ReturnReason {
   WRONG_ITEM_SENT   // resellable → stock +=, RETURN_IN log only
   DAMAGED           // loss → RETURN_IN + ADJUSTMENT (LossReason.DAMAGED)
@@ -77,7 +76,6 @@ enum ReturnReason {
   OTHER             // loss → RETURN_IN + ADJUSTMENT (LossReason.OTHER)
 }
 
-// Approval status of a return request
 enum ReturnRequestStatus {
   PENDING
   APPROVED
@@ -110,13 +108,14 @@ model Employee {
   hashPassword String
   phone        String     @unique
   role         Role
+  image        String?    // NEW: Cloudinary URL
   userStatus   UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   saleRecords    SaleRecord[]
   inventoryLogs  InventoryLog[]
-  returnRequests ReturnRequest[] // requests reviewed by this employee
+  returnRequests ReturnRequest[]
 }
 
 model Customer {
@@ -126,13 +125,14 @@ model Customer {
   address      String?
   phone        String?    @unique
   hashPassword String
+  image        String?    // NEW: Cloudinary URL
   userStatus   UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
   saleRecords    SaleRecord[]
   shoppingCart   ShoppingCart?
-  returnRequests ReturnRequest[] // requests filed by this customer
+  returnRequests ReturnRequest[]
 }
 
 model Supplier {
@@ -159,11 +159,11 @@ model Product {
   size          String?
   barcode       String?       @unique
   price         Float
-  stock         Int           @default(0)   // current available stock
-  reservedStock Int           @default(0)   // held by PENDING/PROCESSING orders
-  piecesPerCase Int           @default(1)   // pieces in one case (e.g. 12 for 750ml, 24 for 250ml)
+  stock         Int           @default(0)
+  reservedStock Int           @default(0)
+  piecesPerCase Int           @default(1)
   expiryDate    DateTime?
-  image         String?
+  image         String?       // Cloudinary URL (already existed)
   status        ProductStatus @default(ACTIVE)
   supplierId    String
   createdAt     DateTime      @default(now())
@@ -199,8 +199,8 @@ model OrderLine {
   id          String   @id @default(cuid())
   saleId      String
   productId   String
-  quantity    Int                  // ordered in CASES
-  returnedQty Int      @default(0) // returned in PIECES (use product.piecesPerCase to convert)
+  quantity    Int
+  returnedQty Int      @default(0)
   price       Float
   subtotal    Float
   createdAt   DateTime @default(now())
@@ -265,12 +265,12 @@ model InventoryLog {
   id            String      @id
   productId     String
   employeeId    String
-  quantity      Int         // positive = stock in, negative = stock out
+  quantity      Int
   type          LogType
   reason        String?
-  lossReason    LossReason? // only set when type = ADJUSTMENT (loss report)
-  referenceId   String?     // deliveryId, saleId, or returnRequestId
-  referenceType String?     // "DELIVERY" | "SALE" | "MANUAL" | "RETURN"
+  lossReason    LossReason?
+  referenceId   String?
+  referenceType String?
   createdAt     DateTime    @default(now())
 
   product  Product  @relation(fields: [productId], references: [id])
@@ -309,18 +309,15 @@ model DeliveryItem {
 // RETURN REQUEST MODELS
 // ==========================================
 
-// One return request per submission.
-// A customer can file multiple requests against the same order
-// (e.g. return some items now, different items later).
 model ReturnRequest {
   id         String              @id
   saleId     String
   customerId String
-  reason     ReturnReason        // one reason applies to the whole request
+  reason     ReturnReason
   status     ReturnRequestStatus @default(PENDING)
-  reviewedBy String?             // employeeId of stock manager who acted
+  reviewedBy String?
   reviewedAt DateTime?
-  reviewNote String?             // optional note from stock manager on rejection
+  reviewNote String?
   createdAt  DateTime            @default(now())
   updatedAt  DateTime            @updatedAt
 
@@ -330,7 +327,6 @@ model ReturnRequest {
   items      ReturnRequestItem[]
 }
 
-// One row per product line included in the return request.
 model ReturnRequestItem {
   id              String   @id
   returnRequestId String
