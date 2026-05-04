@@ -17,7 +17,7 @@ datasource db {
 
 enum Role {
   ADMIN
-  CASHIER	
+  CASHIER
   STOCK_MANAGER
 }
 
@@ -61,13 +61,27 @@ enum LogType {
   RETURN_OUT      // return to supplier → stock decreases
 }
 
-// NEW: reason categories for loss/adjustment logs
 enum LossReason {
   EXPIRED
   DAMAGED
   THEFT
   COUNT_ERROR
   OTHER
+}
+
+// Reason a customer provides when filing a return request
+enum ReturnReason {
+  WRONG_ITEM_SENT   // resellable → stock +=, RETURN_IN log only
+  DAMAGED           // loss → RETURN_IN + ADJUSTMENT (LossReason.DAMAGED)
+  EXPIRED           // loss → RETURN_IN + ADJUSTMENT (LossReason.EXPIRED)
+  OTHER             // loss → RETURN_IN + ADJUSTMENT (LossReason.OTHER)
+}
+
+// Approval status of a return request
+enum ReturnRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 enum OrderStatus {
@@ -100,8 +114,9 @@ model Employee {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  saleRecords   SaleRecord[]
-  inventoryLogs InventoryLog[]
+  saleRecords    SaleRecord[]
+  inventoryLogs  InventoryLog[]
+  returnRequests ReturnRequest[] // requests reviewed by this employee
 }
 
 model Customer {
@@ -115,8 +130,9 @@ model Customer {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  saleRecords  SaleRecord[]
-  shoppingCart ShoppingCart?
+  saleRecords    SaleRecord[]
+  shoppingCart   ShoppingCart?
+  returnRequests ReturnRequest[] // requests filed by this customer
 }
 
 model Supplier {
@@ -143,9 +159,9 @@ model Product {
   size          String?
   barcode       String?       @unique
   price         Float
-  stock         Int           @default(0)           // current available stock
-  reservedStock Int           @default(0)           // NEW: held by PENDING/PROCESSING orders
-  piecesPerCase Int           @default(1)           // NEW: pieces in one case (e.g. 12 for 750ml, 24 for 250ml)
+  stock         Int           @default(0)   // current available stock
+  reservedStock Int           @default(0)   // held by PENDING/PROCESSING orders
+  piecesPerCase Int           @default(1)   // pieces in one case (e.g. 12 for 750ml, 24 for 250ml)
   expiryDate    DateTime?
   image         String?
   status        ProductStatus @default(ACTIVE)
@@ -172,24 +188,26 @@ model SaleRecord {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  employee   Employee?   @relation(fields: [employeeId], references: [id])
-  customer   Customer?   @relation(fields: [customerId], references: [id])
-  orderLines OrderLine[]
-  payment    Payment?
+  employee       Employee?       @relation(fields: [employeeId], references: [id])
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+  orderLines     OrderLine[]
+  payment        Payment?
+  returnRequests ReturnRequest[]
 }
 
 model OrderLine {
   id          String   @id @default(cuid())
   saleId      String
   productId   String
-  quantity    Int                // ordered in CASES
+  quantity    Int                  // ordered in CASES
   returnedQty Int      @default(0) // returned in PIECES (use product.piecesPerCase to convert)
   price       Float
   subtotal    Float
   createdAt   DateTime @default(now())
 
-  saleRecord SaleRecord @relation(fields: [saleId], references: [id])
-  product    Product    @relation(fields: [productId], references: [id])
+  saleRecord         SaleRecord          @relation(fields: [saleId], references: [id])
+  product            Product             @relation(fields: [productId], references: [id])
+  returnRequestItems ReturnRequestItem[]
 }
 
 model Payment {
@@ -243,17 +261,17 @@ model PromotionSale {
 }
 
 model InventoryLog {
-  seq           Int        @unique @default(autoincrement())
-  id            String     @id
+  seq           Int         @unique @default(autoincrement())
+  id            String      @id
   productId     String
   employeeId    String
-  quantity      Int        // positive = stock in, negative = stock out
+  quantity      Int         // positive = stock in, negative = stock out
   type          LogType
   reason        String?
-  lossReason    LossReason? // NEW: only set when type = ADJUSTMENT (loss report)
-  referenceId   String?    // deliveryId or saleId that caused this movement
-  referenceType String?    // "DELIVERY" | "SALE" | "MANUAL"
-  createdAt     DateTime   @default(now())
+  lossReason    LossReason? // only set when type = ADJUSTMENT (loss report)
+  referenceId   String?     // deliveryId, saleId, or returnRequestId
+  referenceType String?     // "DELIVERY" | "SALE" | "MANUAL" | "RETURN"
+  createdAt     DateTime    @default(now())
 
   product  Product  @relation(fields: [productId], references: [id])
   employee Employee @relation(fields: [employeeId], references: [id])
@@ -264,7 +282,7 @@ model Delivery {
   supplierId   String
   deliveryDate DateTime
   status       OrderStatus @default(PENDING)
-  totalItems   Int         // total ordered items count
+  totalItems   Int
   notes        String?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
@@ -277,12 +295,49 @@ model DeliveryItem {
   id          String   @id
   deliveryId  String
   productId   String
-  orderedQty  Int      // how many were ordered from supplier
-  receivedQty Int      @default(0) // how many actually arrived (for partial deliveries)
-  returnedQty Int      @default(0) // how many were sent back to supplier
+  orderedQty  Int
+  receivedQty Int      @default(0)
+  returnedQty Int      @default(0)
   costPrice   Float
   createdAt   DateTime @default(now())
 
   delivery Delivery @relation(fields: [deliveryId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])
+}
+
+// ==========================================
+// RETURN REQUEST MODELS
+// ==========================================
+
+// One return request per submission.
+// A customer can file multiple requests against the same order
+// (e.g. return some items now, different items later).
+model ReturnRequest {
+  id         String              @id
+  saleId     String
+  customerId String
+  reason     ReturnReason        // one reason applies to the whole request
+  status     ReturnRequestStatus @default(PENDING)
+  reviewedBy String?             // employeeId of stock manager who acted
+  reviewedAt DateTime?
+  reviewNote String?             // optional note from stock manager on rejection
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  saleRecord SaleRecord          @relation(fields: [saleId], references: [id])
+  customer   Customer            @relation(fields: [customerId], references: [id])
+  reviewer   Employee?           @relation(fields: [reviewedBy], references: [id])
+  items      ReturnRequestItem[]
+}
+
+// One row per product line included in the return request.
+model ReturnRequestItem {
+  id              String   @id
+  returnRequestId String
+  orderLineId     String
+  returnQty       Int      // in PIECES
+  createdAt       DateTime @default(now())
+
+  returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id])
+  orderLine     OrderLine     @relation(fields: [orderLineId], references: [id])
 }
