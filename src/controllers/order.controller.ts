@@ -45,7 +45,7 @@ export const placeOrder = async (req: Request, res: Response) => {
 
         // item.quantity is in CASES; convert to pieces for stock comparison
         const piecesRequested = item.quantity * product.piecesPerCase;
-        const availableStock = product.stock - product.reservedStock;
+        const availableStock  = product.stock - product.reservedStock;
 
         if (availableStock < piecesRequested) {
           throw new Error(
@@ -118,10 +118,19 @@ export const placeOrder = async (req: Request, res: Response) => {
       if (cart) await tx.shoppingCartItem.deleteMany({ where: { shoppingCartId: cart.id } });
 
       return sale;
+    }, {
+      isolationLevel: 'Serializable', // ← prevents race conditions on simultaneous orders
     });
 
     res.status(201).json({ message: 'Order placed successfully.', saleId: result.id });
   } catch (err: any) {
+    // P2034 = Prisma serialization conflict — two transactions clashed on the same rows
+    if (err?.code === 'P2034') {
+      return res.status(409).json({
+        message: 'Order conflict detected. Please try again.',
+        retryable: true,
+      });
+    }
     const isKnown =
       err?.message?.includes('Insufficient stock') ||
       err?.message?.includes('not found');
@@ -183,7 +192,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     // ── COMPLETED: deduct stock, release reservation, write logs ────────────
     if (status === 'COMPLETED') {
       await prisma.$transaction(async (tx) => {
-        const lines        = await tx.orderLine.findMany({ where: { saleId: id } });
+        const lines         = await tx.orderLine.findMany({ where: { saleId: id } });
         const logEmployeeId = await resolveLogEmployeeId(requester, tx);
 
         for (const line of lines) {
