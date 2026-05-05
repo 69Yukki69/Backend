@@ -23,10 +23,13 @@ async function resolveLogEmployeeId(
  * PLACE ORDER — reserves stock, does NOT deduct it yet.
  *
  * Stock lifecycle:
- *   placeOrder  → reservedStock += (qty × piecesPerCase)   [stock untouched]
- *   COMPLETED   → stock         -= (qty × piecesPerCase)   [STOCK_OUT log]
- *                 reservedStock -= (qty × piecesPerCase)
- *   CANCELLED   → reservedStock -= (qty × piecesPerCase)   [stock untouched, no log]
+ *   placeOrder  → reservedStock += qty   (in cases, stock is tracked in cases)
+ *   COMPLETED   → stock         -= qty   [STOCK_OUT log]
+ *                 reservedStock -= qty
+ *   CANCELLED   → reservedStock -= qty   [stock untouched, no log]
+ *
+ * NOTE: piecesPerCase is NOT used here. Orders and stock are both in cases.
+ *       piecesPerCase is only used in the returns flow.
  */
 export const placeOrder = async (req: Request, res: Response) => {
   const { customerId, paymentMethod, items } = req.body;
@@ -43,14 +46,13 @@ export const placeOrder = async (req: Request, res: Response) => {
         const product = await tx.product.findUnique({ where: { id: item.productId } });
         if (!product) throw new Error(`Product not found: ${item.productId}`);
 
-        // item.quantity is in CASES; convert to pieces for stock comparison
-        const piecesRequested = item.quantity * product.piecesPerCase;
-        const availableStock  = product.stock - product.reservedStock;
+        // item.quantity is in CASES; stock is also tracked in CASES — no conversion needed
+        const availableStock = product.stock - product.reservedStock;
 
-        if (availableStock < piecesRequested) {
+        if (availableStock < item.quantity) {
           throw new Error(
             `Insufficient stock for "${product.productName}". ` +
-            `Available: ${availableStock} pcs, requested: ${piecesRequested} pcs.`
+            `Available: ${availableStock} cases, requested: ${item.quantity} cases.`
           );
         }
       }
@@ -75,11 +77,6 @@ export const placeOrder = async (req: Request, res: Response) => {
 
       // ── 3. Create OrderLines + reserve stock ────────────────────────────────
       for (const item of items) {
-        const product = await tx.product.findUnique({ where: { id: item.productId } });
-        if (!product) throw new Error(`Product not found: ${item.productId}`);
-
-        const piecesReserved = item.quantity * product.piecesPerCase;
-
         await tx.orderLine.create({
           data: {
             saleId:    sale.id,
@@ -90,10 +87,10 @@ export const placeOrder = async (req: Request, res: Response) => {
           },
         });
 
-        // Reserve stock — do NOT touch `stock` yet
+        // Reserve stock in cases — do NOT touch `stock` yet
         await tx.product.update({
           where: { id: item.productId },
-          data:  { reservedStock: { increment: piecesReserved } },
+          data:  { reservedStock: { increment: item.quantity } },
         });
       }
 
@@ -143,7 +140,7 @@ export const placeOrder = async (req: Request, res: Response) => {
  * UPDATE ORDER STATUS
  *
  * COMPLETED transition:
- *   - Deducts stock (pieces) and releases reservation
+ *   - Deducts stock (cases) and releases reservation
  *   - Writes STOCK_OUT inventory log per line
  *
  * CANCELLED transition:
@@ -189,7 +186,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // ── COMPLETED: deduct stock, release reservation, write logs ────────────
+    // ── COMPLETED: deduct stock (cases), release reservation, write logs ────
     if (status === 'COMPLETED') {
       await prisma.$transaction(async (tx) => {
         const lines         = await tx.orderLine.findMany({ where: { saleId: id } });
@@ -199,13 +196,12 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           const product = await tx.product.findUnique({ where: { id: line.productId } });
           if (!product) throw new Error(`Product not found: ${line.productId}`);
 
-          const piecesDeducted = line.quantity * product.piecesPerCase;
-
+          // line.quantity is in cases; stock is tracked in cases — no conversion needed
           await tx.product.update({
             where: { id: line.productId },
             data: {
-              stock:         { decrement: piecesDeducted },
-              reservedStock: { decrement: piecesDeducted },
+              stock:         { decrement: line.quantity },
+              reservedStock: { decrement: line.quantity },
             },
           });
 
@@ -213,7 +209,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
             {
               productId:     line.productId,
               employeeId:    logEmployeeId,
-              quantity:      -piecesDeducted,
+              quantity:      -line.quantity,
               type:          'STOCK_OUT',
               reason:        requester.role === 'CUSTOMER'
                                ? 'Order completed by customer'
@@ -243,14 +239,10 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         const lines = await tx.orderLine.findMany({ where: { saleId: id } });
 
         for (const line of lines) {
-          const product = await tx.product.findUnique({ where: { id: line.productId } });
-          if (!product) throw new Error(`Product not found: ${line.productId}`);
-
-          const piecesReserved = line.quantity * product.piecesPerCase;
-
+          // line.quantity is in cases — release reservation directly
           await tx.product.update({
             where: { id: line.productId },
-            data:  { reservedStock: { decrement: piecesReserved } },
+            data:  { reservedStock: { decrement: line.quantity } },
           });
         }
 
