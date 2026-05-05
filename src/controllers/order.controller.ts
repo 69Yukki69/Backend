@@ -3,21 +3,6 @@ import prisma from '../config/db';
 import { generateId } from '../util/generateId';
 import { createInventoryLog } from '../util/inventoryLogs';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Resolve the employee ID to attach to inventory logs.
- *  If the requester is a customer, fall back to the first ADMIN. */
-async function resolveLogEmployeeId(
-  requester: { id: string; role: string },
-  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
-): Promise<string> {
-  if (requester.role !== 'CUSTOMER') return requester.id;
-
-  const admin = await tx.employee.findFirst({ where: { role: 'ADMIN' } });
-  if (!admin) throw new Error('No admin employee found to process the order.');
-  return admin.id;
-}
-
 // ── POST /orders ──────────────────────────────────────────────────────────────
 /**
  * PLACE ORDER — reserves stock, does NOT deduct it yet.
@@ -66,12 +51,12 @@ export const placeOrder = async (req: Request, res: Response) => {
       const saleId = await generateId('saleRecord');
       const sale = await tx.saleRecord.create({
         data: {
-          id:          saleId,
-          employeeId:  requester.role === 'CUSTOMER' ? null : requester.id,
-          customerId:  customerId ?? null,
+          id:         saleId,
+          employeeId: requester.role === 'CUSTOMER' ? null : requester.id,
+          customerId: customerId ?? null,
           totalAmount,
-          discount:    0,
-          status:      'PENDING',
+          discount:   0,
+          status:     'PENDING',
         },
       });
 
@@ -81,7 +66,7 @@ export const placeOrder = async (req: Request, res: Response) => {
           data: {
             saleId:    sale.id,
             productId: item.productId,
-            quantity:  item.quantity,   // stored in cases
+            quantity:  item.quantity,  // stored in cases
             price:     item.price,
             subtotal:  item.price * item.quantity,
           },
@@ -142,13 +127,15 @@ export const placeOrder = async (req: Request, res: Response) => {
  * COMPLETED transition:
  *   - Deducts stock (cases) and releases reservation
  *   - Writes STOCK_OUT inventory log per line
+ *   - Log is credited to the cashier who last handled the order (order.employeeId).
+ *     Falls back to the first ADMIN only if no employee is assigned.
  *
  * CANCELLED transition:
  *   - Releases reservation only (stock was never touched)
  *   - No inventory log needed
  *
  * All other transitions:
- *   - Status update only
+ *   - Status update only; cashier's ID is stamped onto the order
  */
 export const updateOrderStatus = async (req: Request, res: Response) => {
   const id         = String(req.params.id);
@@ -189,8 +176,15 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     // ── COMPLETED: deduct stock (cases), release reservation, write logs ────
     if (status === 'COMPLETED') {
       await prisma.$transaction(async (tx) => {
-        const lines         = await tx.orderLine.findMany({ where: { saleId: id } });
-        const logEmployeeId = await resolveLogEmployeeId(requester, tx);
+        const lines = await tx.orderLine.findMany({ where: { saleId: id } });
+
+        // Credit the cashier who last handled the order (stamped when cashier moves status).
+        // Fall back to the first ADMIN only if no employee is assigned yet.
+        const logEmployeeId =
+          order.employeeId ??
+          (await tx.employee.findFirst({ where: { role: 'ADMIN' } }))?.id;
+
+        if (!logEmployeeId) throw new Error('No employee found to process the order.');
 
         for (const line of lines) {
           const product = await tx.product.findUnique({ where: { id: line.productId } });
@@ -212,7 +206,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
               quantity:      -line.quantity,
               type:          'STOCK_OUT',
               reason:        requester.role === 'CUSTOMER'
-                               ? 'Order completed by customer'
+                               ? 'Order received by customer'
                                : 'Order completed by cashier',
               referenceId:   id,
               referenceType: 'SALE',
@@ -253,6 +247,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     }
 
     // ── All other transitions (PROCESSING, OUT_FOR_DELIVERY): status only ───
+    // Stamp the cashier's ID onto the order so the COMPLETED log can credit them later.
     const updated = await prisma.saleRecord.update({
       where: { id },
       data:  {
