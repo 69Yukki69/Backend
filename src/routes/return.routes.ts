@@ -1,15 +1,24 @@
 import { Router } from 'express';
-import { processReturn, getOrderReturns } from '../controllers/return.controller';
-import { validate }       from '../middleware/validate';
-import { ProcessReturnDto } from '../dto/return.dto';
+import {
+  submitReturnRequest,
+  reviewReturnRequest,
+  getReturnRequests,
+  getReturnRequestById,
+} from '../controllers/return.controller';
 import { authMiddleware } from '../middleware/authMiddleware';
 
 const router = Router();
 
-// POST  /orders/:id/returns  — cashier or admin processes the return at the counter
-router.post('/:id/returns', authMiddleware(['ADMIN', 'CASHIER']), validate(ProcessReturnDto), processReturn);
+// POST   /returns         — customer submits a return request
+router.post('/',     authMiddleware(['ADMIN', 'CASHIER', 'CUSTOMER']), submitReturnRequest);
 
-// GET   /orders/:id/returns  — staff and the customer who owns the order can view
-router.get( '/:id/returns', authMiddleware(['ADMIN', 'CASHIER', 'STOCK_MANAGER', 'CUSTOMER']), getOrderReturns);
+// PATCH  /returns/:id     — employee approves or rejects a return request
+router.patch('/:id', authMiddleware(['ADMIN', 'CASHIER']),             reviewReturnRequest);
+
+// GET    /returns         — list return requests with filters
+router.get('/',      authMiddleware(['ADMIN', 'CASHIER', 'STOCK_MANAGER', 'CUSTOMER']), getReturnRequests);
+
+// GET    /returns/:id     — get a single return request
+router.get('/:id',   authMiddleware(['ADMIN', 'CASHIER', 'STOCK_MANAGER', 'CUSTOMER']), getReturnRequestById);
 
 export default router;
