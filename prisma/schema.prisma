@@ -310,7 +310,7 @@ model DeliveryItem {
 // ==========================================
 
 model ReturnRequest {
-  id         String              @id
+  id         String             @id @default(uuid())
   saleId     String
   customerId String
   reason     ReturnReason
@@ -328,7 +328,7 @@ model ReturnRequest {
 }
 
 model ReturnRequestItem {
-  id              String   @id
+  id              String @id @default(uuid())
   returnRequestId String
   orderLineId     String
   returnQty       Int      // in PIECES
