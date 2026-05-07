@@ -306,7 +306,10 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
     const sales = await prisma.saleRecord.findMany({
       where:   { customerId },
       orderBy: { createdAt: 'desc' },
-      include: { orderLines: { include: { product: true } } },
+      include: {
+        orderLines: { include: { product: true } },
+        payment:    true,   // ← needed for paymentMethod in normalizeOrder
+      },
     });
 
     const orders = sales.map((sale) => ({
@@ -314,10 +317,16 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
       status:      sale.status,
       createdAt:   sale.createdAt,
       totalAmount: sale.totalAmount,
-      items: sale.orderLines.map((line) => ({
-        name:  line.product.productName,
-        qty:   line.quantity,
-        price: line.price,
+      payment:     sale.payment,
+      orderLines:  sale.orderLines.map((line) => ({
+        id:          line.id,
+        quantity:    line.quantity,
+        returnedQty: line.returnedQty,
+        price:       line.price,
+        product: {
+          productName:   line.product.productName,
+          piecesPerCase: line.product.piecesPerCase,  // ← the fix
+        },
       })),
     }));
 
