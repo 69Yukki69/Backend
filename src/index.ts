@@ -11,7 +11,8 @@ import promoRoutes     from './routes/promo.routes';
 import orderRoutes     from './routes/order.routes';
 import inventoryRoutes from './routes/inventory.routes';
 import uploadRoutes    from './routes/upload.routes';
-import returnRoutes    from './routes/return.routes';  // ADD
+import returnRoutes    from './routes/return.routes';
+import lossReportRoutes from './routes/loss.routes';
 
 const app = express();
 
@@ -47,7 +48,8 @@ app.use('/api/promos',     promoRoutes);
 app.use('/api/orders',     orderRoutes);
 app.use('/api/inventory',  inventoryRoutes);
 app.use('/api/upload',     uploadRoutes);
-app.use('/api/returns',    returnRoutes);              // ADD
+app.use('/api/returns',    returnRoutes);
+app.use('/api/loss-reports', lossReportRoutes); // ← ADD THIS              // ADD
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });
