@@ -12,58 +12,39 @@ const VALID_LOSS_REASONS: LossReason[] = [
 ];
 
 // ── POST /loss-reports ────────────────────────────────────────────────────────
-/**
- * FILE A LOSS REPORT
- *
- * Body: { productId, quantity, lossReason, reason? }
- *
- * Rules:
- *   - quantity must be a positive number (we store it as negative in the log)
- *   - lossReason must be a valid LossReason enum value
- *   - quantity cannot exceed current product.stock
- *   - Appends an ADJUSTMENT log (negative quantity) — never modifies existing logs
- *   - Decrements product.stock by the reported quantity
- */
 export const fileLossReport = async (req: Request, res: Response) => {
   const { productId, quantity, lossReason, reason } = req.body;
   const requester = (req as any).user as { id: string; role: string };
 
-  // ── Input validation ────────────────────────────────────────────────────────
-  if (!productId) {
+  if (!productId)
     return res.status(400).json({ message: 'productId is required.' });
-  }
-  if (!quantity || typeof quantity !== 'number' || quantity < 1) {
+  if (!quantity || typeof quantity !== 'number' || quantity < 1)
     return res.status(400).json({ message: 'quantity must be a positive number.' });
-  }
-  if (!lossReason || !VALID_LOSS_REASONS.includes(lossReason)) {
+  if (!lossReason || !VALID_LOSS_REASONS.includes(lossReason))
     return res.status(400).json({
       message: `lossReason must be one of: ${VALID_LOSS_REASONS.join(', ')}.`,
     });
-  }
 
   try {
     const result = await prisma.$transaction(async (tx) => {
       const product = await tx.product.findUnique({ where: { id: productId } });
       if (!product) throw new Error('Product not found.');
 
-      if (product.stock < quantity) {
+      if (product.stock < quantity)
         throw new Error(
           `Cannot report loss of ${quantity} pcs. Current stock is only ${product.stock} pcs.`
         );
-      }
 
-      // Deduct stock
       await tx.product.update({
         where: { id: productId },
         data:  { stock: { decrement: quantity } },
       });
 
-      // Append ADJUSTMENT log with lossReason — existing logs are never touched
       const log = await createInventoryLog(
         {
           productId,
           employeeId:    requester.id,
-          quantity:      -quantity,   // negative = stock leaving
+          quantity:      -quantity,        // negative = loss
           type:          'ADJUSTMENT',
           lossReason,
           reason:        reason ?? lossReason,
@@ -91,17 +72,6 @@ export const fileLossReport = async (req: Request, res: Response) => {
 };
 
 // ── GET /loss-reports ─────────────────────────────────────────────────────────
-/**
- * LIST LOSS REPORTS
- *
- * Query params:
- *   - lossReason  filter by reason (EXPIRED, DAMAGED, etc.)
- *   - productId   filter by product
- *   - from        ISO date string — start of date range
- *   - to          ISO date string — end of date range
- *   - page        default 1
- *   - limit       default 20, max 50
- */
 export const getLossReports = async (req: Request, res: Response) => {
   try {
     const page       = Math.max(1, Number(req.query.page)  || 1);
@@ -113,12 +83,12 @@ export const getLossReports = async (req: Request, res: Response) => {
     const to         = req.query.to         as string | undefined;
 
     const where: Record<string, unknown> = {
-      type: 'ADJUSTMENT',  // loss reports are always ADJUSTMENT logs
+      type:       'ADJUSTMENT',
+      lossReason: { not: null },   // ← excludes stock resets, keeps only real losses
     };
 
-    if (lossReason && VALID_LOSS_REASONS.includes(lossReason)) {
+    if (lossReason && VALID_LOSS_REASONS.includes(lossReason))
       where.lossReason = lossReason;
-    }
     if (productId) where.productId = productId;
     if (from || to) {
       where.createdAt = {
@@ -134,21 +104,16 @@ export const getLossReports = async (req: Request, res: Response) => {
         take:    limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          product:  { select: { productName: true, category: true } },
+          product:  { select: { productName: true, category: true, size: true, image: true } },
           employee: { select: { name: true, role: true } },
         },
       }),
       prisma.inventoryLog.count({ where }),
     ]);
 
-    // Normalize quantity to positive for display (it's stored as negative)
-    const formatted = logs.map((log) => ({
-      ...log,
-      quantity: Math.abs(log.quantity),
-    }));
-
+    // Keep quantity negative so frontend can display it as a loss (no Math.abs)
     res.json({
-      logs:       formatted,
+      logs,
       total,
       page,
       limit,
@@ -160,10 +125,6 @@ export const getLossReports = async (req: Request, res: Response) => {
 };
 
 // ── GET /loss-reports/summary ─────────────────────────────────────────────────
-/**
- * LOSS SUMMARY — total pieces lost grouped by lossReason
- * Useful for a dashboard widget showing where losses are coming from.
- */
 export const getLossReportSummary = async (req: Request, res: Response) => {
   try {
     const from = req.query.from as string | undefined;
@@ -181,14 +142,14 @@ export const getLossReportSummary = async (req: Request, res: Response) => {
     const grouped = await prisma.inventoryLog.groupBy({
       by:    ['lossReason'],
       where: { type: 'ADJUSTMENT', lossReason: { not: null }, ...dateFilter },
-      _sum:  { quantity: true },
+      _sum:   { quantity: true },
       _count: { id: true },
     });
 
     const summary = grouped.map((g) => ({
-      lossReason:    g.lossReason,
-      totalIncidents: g._count.id,
-      totalPiecesLost: Math.abs(g._sum.quantity ?? 0),
+      lossReason:      g.lossReason,
+      totalIncidents:  g._count.id,
+      totalPiecesLost: Math.abs(g._sum.quantity ?? 0), // abs here is fine — summary always shows positive
     }));
 
     res.json({ summary });
