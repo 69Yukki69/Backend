@@ -151,3 +151,30 @@ export const deleteProduct = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Failed to delete product', error: err });
   }
 };
+
+export const adjustStock = async (req: Request, res: Response) => {
+  try {
+    const { quantity, reason, employeeId } = req.body;
+    const productId = String(req.params.id);
+
+    const product = await prisma.product.findUnique({ where: { id: productId } });
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+
+    const id = await generateId('inventoryLog');
+
+    await prisma.inventoryLog.create({
+      data: {
+        id,
+        productId,
+        employeeId,
+        quantity: Number(quantity),  // positive = add, negative = deduct
+        type: 'ADJUSTMENT',
+        reason: reason || 'Manual Adjustment',
+      }
+    });
+
+    res.json({ message: 'Stock adjusted successfully' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to adjust stock', error: err });
+  }
+};
