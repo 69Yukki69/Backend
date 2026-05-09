@@ -250,18 +250,23 @@ if (status === 'COMPLETED') {
 
     // ── Email → only if customer has an email ────────────────────────────
     if (completedOrder.customer?.email) {
-      await sendOrderCompletedEmail({
-        to: 'rayteodoro0216@gmail.com', // ← your Resend-verified email
-        orderId: id,
-        items: completedOrder.orderLines.map((l) => ({
-          name: l.product.productName,
-          quantity: l.quantity,
-          price: l.price,
-        })),
-        total: completedOrder.totalAmount,
-        paymentMethod: completedOrder.payment?.method ?? 'N/A',
-      });
-    }
+  try {
+    const result = await sendOrderCompletedEmail({
+      to: 'johnnerayteodoro0216@gmail.com',
+      orderId: id,
+      items: completedOrder.orderLines.map((l) => ({
+        name:     l.product.productName,
+        quantity: l.quantity,
+        price:    l.price,
+      })),
+      total:         completedOrder.totalAmount,
+      paymentMethod: completedOrder.payment?.method ?? 'N/A',
+    });
+    console.log('✅ Email sent:', result);
+  } catch (err) {
+    console.error('❌ Email failed:', err);
+  }
+}
   }
 
   return res.json({ message: 'Order marked as completed and stock deducted.' });
