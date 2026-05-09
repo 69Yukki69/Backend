@@ -251,7 +251,7 @@ if (status === 'COMPLETED') {
     // ── Email → only if customer has an email ────────────────────────────
     if (completedOrder.customer?.email) {
       await sendOrderCompletedEmail({
-        to: 'johnnerayteodoro0216@gmail.com', // ← your Resend-verified email
+        to: 'rayteodoro0216@gmail.com', // ← your Resend-verified email
         orderId: id,
         items: completedOrder.orderLines.map((l) => ({
           name: l.product.productName,
