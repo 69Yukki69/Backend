@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import prisma from '../config/db';
 import { generateId } from '../util/generateId';
 import { createInventoryLog } from '../util/inventoryLogs';
+import { io } from '../index';
+import { sendOrderCompletedEmail } from '../util/mailer';
 
 // ── POST /orders ──────────────────────────────────────────────────────────────
 /**
@@ -174,58 +176,91 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     }
 
     // ── COMPLETED: deduct stock (cases), release reservation, write logs ────
-    if (status === 'COMPLETED') {
-      await prisma.$transaction(async (tx) => {
-        const lines = await tx.orderLine.findMany({ where: { saleId: id } });
+if (status === 'COMPLETED') {
+  await prisma.$transaction(async (tx) => {
+    const lines = await tx.orderLine.findMany({
+      where:   { saleId: id },
+      include: { product: true }, // ← add this so you have product names for the email
+    });
 
-        // Credit the cashier who last handled the order (stamped when cashier moves status).
-        // Fall back to the first ADMIN only if no employee is assigned yet.
-        const logEmployeeId =
-          order.employeeId ??
-          (await tx.employee.findFirst({ where: { role: 'ADMIN' } }))?.id;
+    const logEmployeeId =
+      order.employeeId ??
+      (await tx.employee.findFirst({ where: { role: 'ADMIN' } }))?.id;
 
-        if (!logEmployeeId) throw new Error('No employee found to process the order.');
+    if (!logEmployeeId) throw new Error('No employee found to process the order.');
 
-        for (const line of lines) {
-          const product = await tx.product.findUnique({ where: { id: line.productId } });
-          if (!product) throw new Error(`Product not found: ${line.productId}`);
+    for (const line of lines) {
+      const product = await tx.product.findUnique({ where: { id: line.productId } });
+      if (!product) throw new Error(`Product not found: ${line.productId}`);
 
-          // line.quantity is in cases; stock is tracked in cases — no conversion needed
-          await tx.product.update({
-            where: { id: line.productId },
-            data: {
-              stock:         { decrement: line.quantity },
-              reservedStock: { decrement: line.quantity },
-            },
-          });
-
-          await createInventoryLog(
-            {
-              productId:     line.productId,
-              employeeId:    logEmployeeId,
-              quantity:      -line.quantity,
-              type:          'STOCK_OUT',
-              reason:        requester.role === 'CUSTOMER'
-                               ? 'Order received by customer'
-                               : 'Order completed by cashier',
-              referenceId:   id,
-              referenceType: 'SALE',
-            },
-            tx
-          );
-        }
-
-        await tx.saleRecord.update({
-          where: { id },
-          data:  {
-            status: 'COMPLETED',
-            ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
-          },
-        });
+      await tx.product.update({
+        where: { id: line.productId },
+        data: {
+          stock:         { decrement: line.quantity },
+          reservedStock: { decrement: line.quantity },
+        },
       });
 
-      return res.json({ message: 'Order marked as completed and stock deducted.' });
+      await createInventoryLog(
+        {
+          productId:     line.productId,
+          employeeId:    logEmployeeId,
+          quantity:      -line.quantity,
+          type:          'STOCK_OUT',
+          reason:        requester.role === 'CUSTOMER'
+                           ? 'Order received by customer'
+                           : 'Order completed by cashier',
+          referenceId:   id,
+          referenceType: 'SALE',
+        },
+        tx
+      );
     }
+
+    await tx.saleRecord.update({
+      where: { id },
+      data:  {
+        status: 'COMPLETED',
+        ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
+      },
+    });
+  });
+
+  // ── Fetch customer email for notification ─────────────────────────────
+  const completedOrder = await prisma.saleRecord.findUnique({
+    where:   { id },
+    include: {
+      customer:   true,
+      orderLines: { include: { product: true } },
+      payment:    true,
+    },
+  });
+
+  // ── Real-time notification → only if order belongs to a customer ──────
+  if (completedOrder?.customerId) {
+    io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
+      orderId: id,
+      message: `Your order ${id} has been completed!`,
+    });
+
+    // ── Email → only if customer has an email ────────────────────────────
+    if (completedOrder.customer?.email) {
+      await sendOrderCompletedEmail({
+        to:          completedOrder.customer.email,
+        orderId:     id,
+        items:       completedOrder.orderLines.map((l) => ({
+          name:     l.product.productName,
+          quantity: l.quantity,
+          price:    l.price,
+        })),
+        total:       completedOrder.totalAmount,
+        paymentMethod: completedOrder.payment?.method ?? 'N/A',
+      });
+    }
+  }
+
+  return res.json({ message: 'Order marked as completed and stock deducted.' });
+}
 
     // ── CANCELLED: release reservation only, stock was never touched ────────
     if (status === 'CANCELLED') {
