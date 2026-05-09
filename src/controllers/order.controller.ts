@@ -251,14 +251,14 @@ if (status === 'COMPLETED') {
     // ── Email → only if customer has an email ────────────────────────────
     if (completedOrder.customer?.email) {
       await sendOrderCompletedEmail({
-        to:          completedOrder.customer.email,
-        orderId:     id,
-        items:       completedOrder.orderLines.map((l) => ({
-          name:     l.product.productName,
+        to: 'johnnerayteodoro0216@gmail.com', // ← your Resend-verified email
+        orderId: id,
+        items: completedOrder.orderLines.map((l) => ({
+          name: l.product.productName,
           quantity: l.quantity,
-          price:    l.price,
+          price: l.price,
         })),
-        total:       completedOrder.totalAmount,
+        total: completedOrder.totalAmount,
         paymentMethod: completedOrder.payment?.method ?? 'N/A',
       });
     }
