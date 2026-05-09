@@ -105,8 +105,13 @@ export const placeOrder = async (req: Request, res: Response) => {
     }, {
       isolationLevel: 'Serializable', // ← prevents race conditions on simultaneous orders
     });
+// ── Notify cashiers of new order ──────────────────────────────────────────
+      io.to('cashiers').emit('order:new', {
+        orderId: result.id,
+        message: `New order! Order ${result.id} is waiting for review.`,
+      });
 
-    res.status(201).json({ message: 'Order placed successfully.', saleId: result.id });
+      res.status(201).json({ message: 'Order placed successfully.', saleId: result.id });
   } catch (err: any) {
     // P2034 = Prisma serialization conflict — two transactions clashed on the same rows
     if (err?.code === 'P2034') {

@@ -46,9 +46,17 @@ export const io = new Server(httpServer, {
 io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
-  socket.on('join', (userId: string) => {
-    socket.join(`user:${userId}`);
-    console.log(`User ${userId} joined their room`);
+  socket.on('join', (payload: { id: string; role: string }) => {
+    // Customer joins their personal room
+    socket.join(`user:${payload.id}`);
+
+    // Cashiers + admins join the cashiers room for new order notifications
+    if (payload.role === 'CASHIER' || payload.role === 'ADMIN') {
+      socket.join('cashiers');
+      console.log(`${payload.role} ${payload.id} joined cashiers room`);
+    }
+
+    console.log(`User ${payload.id} joined their room`);
   });
 
   socket.on('disconnect', () => {
