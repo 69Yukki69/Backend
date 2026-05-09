@@ -37,7 +37,7 @@ export async function sendOrderCompletedEmail({
     .join('');
 
   const result = await resend.emails.send({
-    from:    'orders@yourdomain.com',
+    from:    'onboarding@resend.dev',
     to,
     subject: `Your order ${orderId} is complete!`,
     html: `
