@@ -4,6 +4,7 @@ import { generateId } from '../util/generateId';
 import { createInventoryLog } from '../util/inventoryLogs';
 import { io } from '../index';
 import { sendOrderCompletedEmail } from '../util/mailer';
+import { deductStockFIFOService } from '../util/stockBatch'; // ← ADDED
 
 // ── POST /orders ──────────────────────────────────────────────────────────────
 export const placeOrder = async (req: Request, res: Response) => {
@@ -167,6 +168,10 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           const product = await tx.product.findUnique({ where: { id: line.productId } });
           if (!product) throw new Error(`Product not found: ${line.productId}`);
 
+          // ── FEFO batch deduction ─────────────────────────────────────────── ← ADDED
+          await deductStockFIFOService(tx, line.productId, line.quantity);
+
+          // ── Decrement stock + release reservation ────────────────────────────
           await tx.product.update({
             where: { id: line.productId },
             data: {
@@ -212,14 +217,12 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
 
       // ── Real-time notifications ───────────────────────────────────────────
       if (completedOrder?.customerId) {
-        // Notify the customer
         io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
           orderId: id,
           message: `🎉 Your order ${id} has been completed!`,
         });
       }
 
-      // Notify cashiers/admins regardless of whether there's a customer
       io.to('cashiers').emit('order:completed', {
         orderId: id,
         message: `✅ Order ${id} has been received by the customer.`,
@@ -263,7 +266,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         await tx.saleRecord.update({ where: { id }, data: { status: 'CANCELLED' } });
       });
 
-      // ── Notify customer ───────────────────────────────────────────────────
       if (order.customerId) {
         io.to(`user:${order.customerId}`).emit('order:status', {
           orderId: id,
@@ -272,7 +274,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         });
       }
 
-      // ── Notify cashiers ───────────────────────────────────────────────────
       io.to('cashiers').emit('order:status', {
         orderId: id,
         status:  'CANCELLED',
@@ -291,7 +292,6 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       },
     });
 
-    // ── Notify customer of status change ──────────────────────────────────
     if (order.customerId) {
       const statusMessages: Record<string, string> = {
         PROCESSING:       `⚙️ Your order ${id} is now being processed!`,
@@ -371,7 +371,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
       payment:     sale.payment,
       orderLines:  sale.orderLines.map((line) => ({
         id:          line.id,
-        quantity:    line.quantity, 
+        quantity:    line.quantity,
         returnedQty: line.returnedQty,
         price:       line.price,
         product: {
