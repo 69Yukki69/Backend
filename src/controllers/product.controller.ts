@@ -7,41 +7,29 @@ export const getProducts = async (req: Request, res: Response) => {
   try {
     const products = await prisma.product.findMany({
       orderBy: { createdAt: 'desc' },
-      include: { supplier: true,
-        promotionSales: true
-       }
+      include: { supplier: true, promotionSales: true }
     });
 
     const stockMap = await getStockMany(products.map(p => p.id));
-        const result = products.map(p => {
-        const stock = stockMap[p.id] ?? 0;
-
-        let finalPrice = p.price;
-
-        const now = new Date();
-
-        const activePromo = p.promotionSales.find(ps =>
-          ps.isActive &&
-          now >= new Date(ps.dateEffective) &&
-          now <= new Date(ps.lastDate)
-        );
-        if (activePromo) {
-          if (activePromo.discountPercent) {
-            finalPrice = p.price - (p.price * activePromo.discountPercent) / 100;
-          } else {
-            finalPrice = activePromo.alteredPrice;
-          }
-
-          if (finalPrice < 0) finalPrice = 0;
+    const result = products.map(p => {
+      const stock = stockMap[p.id] ?? 0;
+      let finalPrice = p.price;
+      const now = new Date();
+      const activePromo = p.promotionSales.find(ps =>
+        ps.isActive &&
+        now >= new Date(ps.dateEffective) &&
+        now <= new Date(ps.lastDate)
+      );
+      if (activePromo) {
+        if (activePromo.discountPercent) {
+          finalPrice = p.price - (p.price * activePromo.discountPercent) / 100;
+        } else {
+          finalPrice = activePromo.alteredPrice;
         }
-
-        return {
-          ...p,
-          stock,
-          finalPrice,
-          activePromo
-        };
-      });
+        if (finalPrice < 0) finalPrice = 0;
+      }
+      return { ...p, stock, finalPrice, activePromo };
+    });
 
     res.json(result);
   } catch (err) {
@@ -53,40 +41,28 @@ export const getProduct = async (req: Request, res: Response) => {
   try {
     const product = await prisma.product.findUnique({
       where: { id: String(req.params.id) },
-      include: { supplier: true,
-        promotionSales: true
-       }
+      include: { supplier: true, promotionSales: true }
     });
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
     const stock = await getStock(product.id);
-
     const now = new Date();
-
     const activePromo = product.promotionSales.find(ps =>
       ps.isActive &&
       now >= new Date(ps.dateEffective) &&
       now <= new Date(ps.lastDate)
     );
-
     let finalPrice = product.price;
-
     if (activePromo) {
       if (activePromo.discountPercent) {
         finalPrice = product.price - (product.price * activePromo.discountPercent) / 100;
       } else {
         finalPrice = activePromo.alteredPrice;
       }
-
       if (finalPrice < 0) finalPrice = 0;
     }
 
-    res.json({
-      ...product,
-      stock,
-      finalPrice,
-      activePromo
-    });
+    res.json({ ...product, stock, finalPrice, activePromo });
   } catch (err) {
     res.status(500).json({ message: 'Failed to get product', error: err });
   }
@@ -94,7 +70,6 @@ export const getProduct = async (req: Request, res: Response) => {
 
 export const createProduct = async (req: Request, res: Response) => {
   try {
-    // removed expiryDate from destructure
     const { productName, category, size, price, supplierId, image, barcode, status, piecesPerCase } = req.body;
     const id = await generateId('product');
     const product = await prisma.product.create({
@@ -108,7 +83,7 @@ export const createProduct = async (req: Request, res: Response) => {
         image: image || null,
         barcode: barcode || null,
         status: status || 'ACTIVE',
-        piecesPerCase: piecesPerCase ? parseInt(piecesPerCase, 10) : 1, // ← add
+        piecesPerCase: piecesPerCase ? parseInt(piecesPerCase, 10) : 1,
       }
     });
     res.json(product);
@@ -119,7 +94,7 @@ export const createProduct = async (req: Request, res: Response) => {
 
 export const updateProduct = async (req: Request, res: Response) => {
   try {
-    const { productName, category, size, price, image, barcode, status, piecesPerCase } = req.body; // ← add piecesPerCase
+    const { productName, category, size, price, image, barcode, status, piecesPerCase } = req.body;
     const product = await prisma.product.update({
       where: { id: String(req.params.id) },
       data: {
@@ -127,7 +102,7 @@ export const updateProduct = async (req: Request, res: Response) => {
         category,
         size: size || null,
         price: Number(price),
-        piecesPerCase: piecesPerCase ? parseInt(piecesPerCase, 10) : 1, // ← add this
+        piecesPerCase: piecesPerCase ? parseInt(piecesPerCase, 10) : 1,
         image: image || null,
         barcode: barcode || null,
         status
@@ -141,9 +116,7 @@ export const updateProduct = async (req: Request, res: Response) => {
 
 export const deleteProduct = async (req: Request, res: Response) => {
   try {
-    await prisma.product.delete({
-      where: { id: String(req.params.id) }
-    });
+    await prisma.product.delete({ where: { id: String(req.params.id) } });
     res.json({ message: 'Product deleted' });
   } catch (err) {
     res.status(500).json({ message: 'Failed to delete product', error: err });
@@ -154,21 +127,32 @@ export const adjustStock = async (req: Request, res: Response) => {
   try {
     const { quantity, reason, employeeId } = req.body;
     const productId = String(req.params.id);
+    const qty = Number(quantity); // positive = add, negative = deduct
 
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
     const id = await generateId('inventoryLog');
 
-    await prisma.inventoryLog.create({
-      data: {
-        id,
-        productId,
-        employeeId,
-        quantity: Number(quantity),  // positive = add, negative = deduct
-        type: 'ADJUSTMENT',
-        reason: reason || 'Manual Adjustment',
-      }
+    await prisma.$transaction(async (tx) => {
+      // ── 1. Update product stock ──────────────────────────────────────
+      await tx.product.update({
+        where: { id: productId },
+        data: { stock: { increment: qty } },
+      });
+
+      // ── 2. Log the adjustment ────────────────────────────────────────
+      await tx.inventoryLog.create({
+        data: {
+          id,
+          productId,
+          employeeId,
+          quantity: qty,
+          type: 'ADJUSTMENT',
+          reason: reason || 'Manual Adjustment',
+          referenceType: 'MANUAL',
+        },
+      });
     });
 
     res.json({ message: 'Stock adjusted successfully' });
