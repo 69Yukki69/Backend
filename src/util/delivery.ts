@@ -57,11 +57,12 @@ export const updateDeliveryService = async (
 export const receiveDeliveryItemsService = async (
   deliveryId: string,
   employeeId: string,
-  receivedItems: { deliveryItemId: string; receivedQty: number }[]
+  receivedItems: {
+    deliveryItemId: string;
+    receivedQty: number;
+    expiryDate?: string | null; // ← new: batch expiry date from the box
+  }[]
 ) => {
-  // ✅ Generate all log IDs in one batch BEFORE the transaction.
-  // generateIds() reads the current max numeric ID once, then increments
-  // locally — no DB reads inside the loop, no collision possible.
   const logIds = await generateIds("inventoryLog", receivedItems.length);
 
   return await prisma.$transaction(async (tx) => {
@@ -92,9 +93,16 @@ export const receiveDeliveryItemsService = async (
         throw new Error("Received quantity exceeds ordered quantity");
       }
 
+      // ── Update delivery item: receivedQty + expiryDate ──────────────────
       await tx.deliveryItem.update({
         where: { id: received.deliveryItemId },
-        data: { receivedQty: { increment: received.receivedQty } },
+        data: {
+          receivedQty: { increment: received.receivedQty },
+          // Only set expiryDate if provided — keeps existing date if not re-submitted
+          ...(received.expiryDate !== undefined && {
+            expiryDate: received.expiryDate ? new Date(received.expiryDate) : null,
+          }),
+        },
       });
 
       await tx.product.update({
@@ -104,7 +112,7 @@ export const receiveDeliveryItemsService = async (
 
       await tx.inventoryLog.create({
         data: {
-          id: logIds[i], // pre-generated, guaranteed unique
+          id: logIds[i],
           productId: deliveryItem.productId,
           employeeId,
           quantity: received.receivedQty,
@@ -134,6 +142,47 @@ export const receiveDeliveryItemsService = async (
       where: { id: deliveryId },
       include: { items: true, supplier: true },
     });
+  });
+};
+
+// Returns all delivery items expiring within the next `days` days
+export const getExpiringItemsService = async (days: number = 30) => {
+  const now = new Date();
+  const threshold = new Date();
+  threshold.setDate(now.getDate() + days);
+
+  return await prisma.deliveryItem.findMany({
+    where: {
+      expiryDate: {
+        gte: now,
+        lte: threshold,
+      },
+    },
+    include: {
+      product: true,
+      delivery: {
+        include: { supplier: true },
+      },
+    },
+    orderBy: { expiryDate: "asc" },
+  });
+};
+
+// Returns all delivery items that are already expired
+export const getExpiredItemsService = async () => {
+  return await prisma.deliveryItem.findMany({
+    where: {
+      expiryDate: {
+        lt: new Date(),
+      },
+    },
+    include: {
+      product: true,
+      delivery: {
+        include: { supplier: true },
+      },
+    },
+    orderBy: { expiryDate: "asc" },
   });
 };
 

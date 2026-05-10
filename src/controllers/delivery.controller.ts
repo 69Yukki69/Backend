@@ -6,6 +6,8 @@ import {
   updateDeliveryService,
   deleteDeliveryService,
   receiveDeliveryItemsService,
+  getExpiringItemsService,
+  getExpiredItemsService,
 } from "../util/delivery";
 import {
   createDeliverySchema,
@@ -60,7 +62,7 @@ export const updateDeliveryController = async (req: Request, res: Response) => {
 };
 
 // PATCH /deliveries/:id/receive
-// Body: { employeeId: string, items: [{ deliveryItemId, receivedQty }] }
+// Body: { employeeId, items: [{ deliveryItemId, receivedQty, expiryDate? }] }
 export const receiveDeliveryController = async (req: Request, res: Response) => {
   try {
     const parsed = receiveDeliveryItemsSchema.parse(req.body);
@@ -73,20 +75,40 @@ export const receiveDeliveryController = async (req: Request, res: Response) => 
 
     res.json(result);
   } catch (error) {
-    console.error("RECEIVE ERROR:", error); // 👈 ADD THIS
-
+    console.error("RECEIVE ERROR:", error);
     res.status(400).json({
       message: error instanceof Error ? error.message : "Failed to receive delivery",
     });
   }
 };
 
-// DELETE /deliveries/:id
+// GET /deliveries/expiring-soon?days=30
+// Returns items expiring within the next N days (default 30)
+export const getExpiringItemsController = async (req: Request, res: Response) => {
+  try {
+    const days = req.query.days ? parseInt(req.query.days as string) : 30;
+    const items = await getExpiringItemsService(days);
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch expiring items" });
+  }
+};
+
+// GET /deliveries/expired
+// Returns items that are already past their expiry date
+export const getExpiredItemsController = async (req: Request, res: Response) => {
+  try {
+    const items = await getExpiredItemsService();
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch expired items" });
+  }
+};
+
 // DELETE /deliveries/:id
 export const deleteDeliveryController = async (req: Request, res: Response) => {
   try {
     await deleteDeliveryService(getId(req));
-    // Return JSON so frontend can parse it
     res.json({ success: true, message: "Delivery deleted successfully" });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete delivery" });

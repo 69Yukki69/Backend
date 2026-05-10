@@ -108,7 +108,7 @@ model Employee {
   hashPassword String
   phone        String     @unique
   role         Role
-  image        String?    // NEW: Cloudinary URL
+  image        String?
   userStatus   UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -125,7 +125,7 @@ model Customer {
   address      String?
   phone        String?    @unique
   hashPassword String
-  image        String?    // NEW: Cloudinary URL
+  image        String?
   userStatus   UserStatus @default(ACTIVE)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -162,8 +162,7 @@ model Product {
   stock         Int           @default(0)
   reservedStock Int           @default(0)
   piecesPerCase Int           @default(1)
-  expiryDate    DateTime?
-  image         String?       // Cloudinary URL (already existed)
+  image         String?
   status        ProductStatus @default(ACTIVE)
   supplierId    String
   createdAt     DateTime      @default(now())
@@ -229,7 +228,7 @@ model ShoppingCart {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  customer Customer          @relation(fields: [customerId], references: [id])
+  customer Customer           @relation(fields: [customerId], references: [id])
   items    ShoppingCartItem[]
 }
 
@@ -292,14 +291,15 @@ model Delivery {
 }
 
 model DeliveryItem {
-  id          String   @id
+  id          String    @id
   deliveryId  String
   productId   String
   orderedQty  Int
-  receivedQty Int      @default(0)
-  returnedQty Int      @default(0)
+  receivedQty Int       @default(0)
+  returnedQty Int       @default(0)
   costPrice   Float
-  createdAt   DateTime @default(now())
+  expiryDate  DateTime? // ← batch expiry date recorded when delivery is received
+  createdAt   DateTime  @default(now())
 
   delivery Delivery @relation(fields: [deliveryId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])
@@ -310,7 +310,7 @@ model DeliveryItem {
 // ==========================================
 
 model ReturnRequest {
-  id         String             @id @default(uuid())
+  id         String              @id @default(uuid())
   saleId     String
   customerId String
   reason     ReturnReason
@@ -328,10 +328,10 @@ model ReturnRequest {
 }
 
 model ReturnRequestItem {
-  id              String @id @default(uuid())
+  id              String   @id @default(uuid())
   returnRequestId String
   orderLineId     String
-  returnQty       Int      // in PIECES
+  returnQty       Int
   createdAt       DateTime @default(now())
 
   returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id])
