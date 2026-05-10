@@ -6,18 +6,6 @@ import { io } from '../index';
 import { sendOrderCompletedEmail } from '../util/mailer';
 
 // ── POST /orders ──────────────────────────────────────────────────────────────
-/**
- * PLACE ORDER — reserves stock, does NOT deduct it yet.
- *
- * Stock lifecycle:
- *   placeOrder  → reservedStock += qty   (in cases, stock is tracked in cases)
- *   COMPLETED   → stock         -= qty   [STOCK_OUT log]
- *                 reservedStock -= qty
- *   CANCELLED   → reservedStock -= qty   [stock untouched, no log]
- *
- * NOTE: piecesPerCase is NOT used here. Orders and stock are both in cases.
- *       piecesPerCase is only used in the returns flow.
- */
 export const placeOrder = async (req: Request, res: Response) => {
   const { customerId, paymentMethod, items } = req.body;
   const requester = (req as any).user as { id: string; role: string };
@@ -33,9 +21,7 @@ export const placeOrder = async (req: Request, res: Response) => {
         const product = await tx.product.findUnique({ where: { id: item.productId } });
         if (!product) throw new Error(`Product not found: ${item.productId}`);
 
-        // item.quantity is in CASES; stock is also tracked in CASES — no conversion needed
         const availableStock = product.stock - product.reservedStock;
-
         if (availableStock < item.quantity) {
           throw new Error(
             `Insufficient stock for "${product.productName}". ` +
@@ -68,13 +54,12 @@ export const placeOrder = async (req: Request, res: Response) => {
           data: {
             saleId:    sale.id,
             productId: item.productId,
-            quantity:  item.quantity,  // stored in cases
+            quantity:  item.quantity,
             price:     item.price,
             subtotal:  item.price * item.quantity,
           },
         });
 
-        // Reserve stock in cases — do NOT touch `stock` yet
         await tx.product.update({
           where: { id: item.productId },
           data:  { reservedStock: { increment: item.quantity } },
@@ -103,17 +88,17 @@ export const placeOrder = async (req: Request, res: Response) => {
 
       return sale;
     }, {
-      isolationLevel: 'Serializable', // ← prevents race conditions on simultaneous orders
+      isolationLevel: 'Serializable',
     });
-// ── Notify cashiers of new order ──────────────────────────────────────────
-      io.to('cashiers').emit('order:new', {
-        orderId: result.id,
-        message: `New order! Order ${result.id} is waiting for review.`,
-      });
 
-      res.status(201).json({ message: 'Order placed successfully.', saleId: result.id });
+    // ── Notify cashiers of new order ──────────────────────────────────────────
+    io.to('cashiers').emit('order:new', {
+      orderId: result.id,
+      message: `New order! Order ${result.id} is waiting for review.`,
+    });
+
+    res.status(201).json({ message: 'Order placed successfully.', saleId: result.id });
   } catch (err: any) {
-    // P2034 = Prisma serialization conflict — two transactions clashed on the same rows
     if (err?.code === 'P2034') {
       return res.status(409).json({
         message: 'Order conflict detected. Please try again.',
@@ -128,22 +113,6 @@ export const placeOrder = async (req: Request, res: Response) => {
 };
 
 // ── PATCH /orders/:id/status ──────────────────────────────────────────────────
-/**
- * UPDATE ORDER STATUS
- *
- * COMPLETED transition:
- *   - Deducts stock (cases) and releases reservation
- *   - Writes STOCK_OUT inventory log per line
- *   - Log is credited to the cashier who last handled the order (order.employeeId).
- *     Falls back to the first ADMIN only if no employee is assigned.
- *
- * CANCELLED transition:
- *   - Releases reservation only (stock was never touched)
- *   - No inventory log needed
- *
- * All other transitions:
- *   - Status update only; cashier's ID is stamped onto the order
- */
 export const updateOrderStatus = async (req: Request, res: Response) => {
   const id         = String(req.params.id);
   const { status } = req.body;
@@ -180,105 +149,104 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // ── COMPLETED: deduct stock (cases), release reservation, write logs ────
-if (status === 'COMPLETED') {
-  await prisma.$transaction(async (tx) => {
-    const lines = await tx.orderLine.findMany({
-      where:   { saleId: id },
-      include: { product: true }, // ← add this so you have product names for the email
-    });
+    // ── COMPLETED: deduct stock, release reservation, write logs ─────────────
+    if (status === 'COMPLETED') {
+      await prisma.$transaction(async (tx) => {
+        const lines = await tx.orderLine.findMany({
+          where:   { saleId: id },
+          include: { product: true },
+        });
 
-    const logEmployeeId =
-      order.employeeId ??
-      (await tx.employee.findFirst({ where: { role: 'ADMIN' } }))?.id;
+        const logEmployeeId =
+          order.employeeId ??
+          (await tx.employee.findFirst({ where: { role: 'ADMIN' } }))?.id;
 
-    if (!logEmployeeId) throw new Error('No employee found to process the order.');
+        if (!logEmployeeId) throw new Error('No employee found to process the order.');
 
-    for (const line of lines) {
-      const product = await tx.product.findUnique({ where: { id: line.productId } });
-      if (!product) throw new Error(`Product not found: ${line.productId}`);
+        for (const line of lines) {
+          const product = await tx.product.findUnique({ where: { id: line.productId } });
+          if (!product) throw new Error(`Product not found: ${line.productId}`);
 
-      await tx.product.update({
-        where: { id: line.productId },
-        data: {
-          stock:         { decrement: line.quantity },
-          reservedStock: { decrement: line.quantity },
+          await tx.product.update({
+            where: { id: line.productId },
+            data: {
+              stock:         { decrement: line.quantity },
+              reservedStock: { decrement: line.quantity },
+            },
+          });
+
+          await createInventoryLog(
+            {
+              productId:     line.productId,
+              employeeId:    logEmployeeId,
+              quantity:      -line.quantity,
+              type:          'STOCK_OUT',
+              reason:        requester.role === 'CUSTOMER'
+                               ? 'Order received by customer'
+                               : 'Order completed by cashier',
+              referenceId:   id,
+              referenceType: 'SALE',
+            },
+            tx
+          );
+        }
+
+        await tx.saleRecord.update({
+          where: { id },
+          data:  {
+            status: 'COMPLETED',
+            ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
+          },
+        });
+      });
+
+      // ── Fetch completed order for notification + email ────────────────────
+      const completedOrder = await prisma.saleRecord.findUnique({
+        where:   { id },
+        include: {
+          customer:   true,
+          orderLines: { include: { product: true } },
+          payment:    true,
         },
       });
 
-      await createInventoryLog(
-        {
-          productId:     line.productId,
-          employeeId:    logEmployeeId,
-          quantity:      -line.quantity,
-          type:          'STOCK_OUT',
-          reason:        requester.role === 'CUSTOMER'
-                           ? 'Order received by customer'
-                           : 'Order completed by cashier',
-          referenceId:   id,
-          referenceType: 'SALE',
-        },
-        tx
-      );
+      // ── Real-time notification ────────────────────────────────────────────
+      if (completedOrder?.customerId) {
+        io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
+          orderId: id,
+          message: `🎉 Your order ${id} has been completed!`,
+        });
+
+        // ── Email ─────────────────────────────────────────────────────────
+        if (completedOrder.customer?.email) {
+          try {
+            const result = await sendOrderCompletedEmail({
+              to:      'johnnerayteodoro0216@gmail.com',
+              orderId: id,
+              items:   completedOrder.orderLines.map((l) => ({
+                name:     l.product.productName,
+                quantity: l.quantity,
+                price:    l.price,
+              })),
+              total:         completedOrder.totalAmount,
+              paymentMethod: completedOrder.payment?.method ?? 'N/A',
+            });
+            console.log('✅ Email sent:', result);
+          } catch (err) {
+            console.error('❌ Email failed:', err);
+          }
+        }
+      }
+
+      return res.json({ message: 'Order marked as completed and stock deducted.' });
     }
 
-    await tx.saleRecord.update({
-      where: { id },
-      data:  {
-        status: 'COMPLETED',
-        ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
-      },
-    });
-  });
-
-  // ── Fetch customer email for notification ─────────────────────────────
-  const completedOrder = await prisma.saleRecord.findUnique({
-    where:   { id },
-    include: {
-      customer:   true,
-      orderLines: { include: { product: true } },
-      payment:    true,
-    },
-  });
-
-  // ── Real-time notification → only if order belongs to a customer ──────
-  if (completedOrder?.customerId) {
-    io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
-      orderId: id,
-      message: `Your order ${id} has been completed!`,
-    });
-
-    // ── Email → only if customer has an email ────────────────────────────
-    if (completedOrder.customer?.email) {
-  try {
-    const result = await sendOrderCompletedEmail({
-      to: 'johnnerayteodoro0216@gmail.com',
-      orderId: id,
-      items: completedOrder.orderLines.map((l) => ({
-        name:     l.product.productName,
-        quantity: l.quantity,
-        price:    l.price,
-      })),
-      total:         completedOrder.totalAmount,
-      paymentMethod: completedOrder.payment?.method ?? 'N/A',
-    });
-    console.log('✅ Email sent:', result);
-  } catch (err) {
-    console.error('❌ Email failed:', err);
-  }
-}
-  }
-
-  return res.json({ message: 'Order marked as completed and stock deducted.' });
-}
-
-    // ── CANCELLED: release reservation only, stock was never touched ────────
+    // ── CANCELLED: release reservation only ───────────────────────────────────
     if (status === 'CANCELLED') {
       await prisma.$transaction(async (tx) => {
         const lines = await tx.orderLine.findMany({ where: { saleId: id } });
 
         for (const line of lines) {
-          // line.quantity is in cases — release reservation directly
           await tx.product.update({
             where: { id: line.productId },
             data:  { reservedStock: { decrement: line.quantity } },
@@ -288,11 +256,19 @@ if (status === 'COMPLETED') {
         await tx.saleRecord.update({ where: { id }, data: { status: 'CANCELLED' } });
       });
 
+      // ── Notify customer ───────────────────────────────────────────────────
+      if (order.customerId) {
+        io.to(`user:${order.customerId}`).emit('order:status', {
+          orderId: id,
+          status:  'CANCELLED',
+          message: `❌ Your order ${id} has been cancelled.`,
+        });
+      }
+
       return res.json({ message: 'Order cancelled and stock reservation released.' });
     }
 
-    // ── All other transitions (PROCESSING, OUT_FOR_DELIVERY): status only ───
-    // Stamp the cashier's ID onto the order so the COMPLETED log can credit them later.
+    // ── All other transitions (PROCESSING, OUT_FOR_DELIVERY) ─────────────────
     const updated = await prisma.saleRecord.update({
       where: { id },
       data:  {
@@ -300,6 +276,22 @@ if (status === 'COMPLETED') {
         ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
       },
     });
+
+    // ── Notify customer of status change ──────────────────────────────────
+    if (order.customerId) {
+      const statusMessages: Record<string, string> = {
+        PROCESSING:       `⚙️ Your order ${id} is now being processed!`,
+        OUT_FOR_DELIVERY: `🚚 Your order ${id} is out for delivery!`,
+      };
+      const message = statusMessages[status];
+      if (message) {
+        io.to(`user:${order.customerId}`).emit('order:status', {
+          orderId: id,
+          status,
+          message,
+        });
+      }
+    }
 
     res.json(updated);
   } catch (err: any) {
@@ -353,7 +345,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
       include: {
         orderLines: { include: { product: true } },
-        payment:    true,   // ← needed for paymentMethod in normalizeOrder
+        payment:    true,
       },
     });
 
@@ -370,7 +362,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
         price:       line.price,
         product: {
           productName:   line.product.productName,
-          piecesPerCase: line.product.piecesPerCase,  // ← the fix
+          piecesPerCase: line.product.piecesPerCase,
         },
       })),
     }));
