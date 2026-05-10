@@ -94,8 +94,8 @@ export const getProduct = async (req: Request, res: Response) => {
 
 export const createProduct = async (req: Request, res: Response) => {
   try {
-    // removed stockQuantity from destructure
-    const { productName, category, size, price, supplierId, image, barcode, expiryDate, status, piecesPerCase } = req.body;
+    // removed expiryDate from destructure
+    const { productName, category, size, price, supplierId, image, barcode, status, piecesPerCase } = req.body;
     const id = await generateId('product');
     const product = await prisma.product.create({
       data: {
@@ -107,7 +107,6 @@ export const createProduct = async (req: Request, res: Response) => {
         supplierId,
         image: image || null,
         barcode: barcode || null,
-        expiryDate: expiryDate ? new Date(expiryDate) : null,
         status: status || 'ACTIVE',
         piecesPerCase: piecesPerCase ? parseInt(piecesPerCase, 10) : 1, // ← add
       }
@@ -120,7 +119,7 @@ export const createProduct = async (req: Request, res: Response) => {
 
 export const updateProduct = async (req: Request, res: Response) => {
   try {
-    const { productName, category, size, price, image, barcode, expiryDate, status, piecesPerCase } = req.body; // ← add piecesPerCase
+    const { productName, category, size, price, image, barcode, status, piecesPerCase } = req.body; // ← add piecesPerCase
     const product = await prisma.product.update({
       where: { id: String(req.params.id) },
       data: {
@@ -131,7 +130,6 @@ export const updateProduct = async (req: Request, res: Response) => {
         piecesPerCase: piecesPerCase ? parseInt(piecesPerCase, 10) : 1, // ← add this
         image: image || null,
         barcode: barcode || null,
-        expiryDate: expiryDate ? new Date(expiryDate) : null,
         status
       }
     });
