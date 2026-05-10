@@ -26,6 +26,7 @@ export const receiveDeliveryItemsSchema = z.object({
     z.object({
       deliveryItemId: z.string().min(1),
       receivedQty: z.number().int().positive(),
+      expiryDate: z.string().nullable().optional(), // ← ADD THIS
     })
   ),
 });
