@@ -13,7 +13,8 @@ export type ModelName =
   | 'promotionSale'
   | 'inventoryLog'
   | 'delivery'
-  | 'deliveryItem';
+  | 'deliveryItem'
+  | 'stockBatch'; // ← ADDED
 
 const prefixMap: Record<ModelName, string> = {
   employee:         'EMP',
@@ -29,6 +30,7 @@ const prefixMap: Record<ModelName, string> = {
   inventoryLog:     'LOG',
   delivery:         'DEL',
   deliveryItem:     'DLI',
+  stockBatch:       'BTH', // ← ADDED
 };
 
 const getLastNumber = async (model: ModelName): Promise<number> => {
@@ -48,6 +50,7 @@ const getLastNumber = async (model: ModelName): Promise<number> => {
     case 'inventoryLog':     { const r = await prisma.inventoryLog.findMany({ select: { id: true } });     lastId = getMaxId(r); break; }
     case 'delivery':         { const r = await prisma.delivery.findMany({ select: { id: true } });         lastId = getMaxId(r); break; }
     case 'deliveryItem':     { const r = await prisma.deliveryItem.findMany({ select: { id: true } });     lastId = getMaxId(r); break; }
+    case 'stockBatch':       { const r = await prisma.stockBatch.findMany({ select: { id: true } });       lastId = getMaxId(r); break; } // ← ADDED
   }
 
   if (!lastId) return 1000;
@@ -56,8 +59,6 @@ const getLastNumber = async (model: ModelName): Promise<number> => {
   return isNaN(num) ? 1000 : num;
 };
 
-// Finds the record with the highest numeric suffix — avoids lexicographic
-// ordering bugs where "LOG-1009" sorts after "LOG-10010" as a string.
 const getMaxId = (records: { id: string }[]): string | null => {
   if (records.length === 0) return null;
   return records.reduce((max, r) => {
@@ -67,15 +68,12 @@ const getMaxId = (records: { id: string }[]): string | null => {
   }).id;
 };
 
-// Generate `count` sequential IDs at once — safe for use before a transaction
-// because all reads happen in a single moment, then numbers are incremented locally.
 export const generateIds = async (model: ModelName, count: number): Promise<string[]> => {
   const prefix  = prefixMap[model];
   const lastNum = await getLastNumber(model);
   return Array.from({ length: count }, (_, i) => `${prefix}-${lastNum + 1 + i}`);
 };
 
-// Single ID — backward compatible with all existing call sites
 export const generateId = async (model: ModelName): Promise<string> => {
   const ids = await generateIds(model, 1);
   return ids[0];

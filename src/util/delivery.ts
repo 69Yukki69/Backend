@@ -60,7 +60,7 @@ export const receiveDeliveryItemsService = async (
   receivedItems: {
     deliveryItemId: string;
     receivedQty: number;
-    expiryDate?: string | null; // ← new: batch expiry date from the box
+    expiryDate?: string | null;
   }[]
 ) => {
   const logIds = await generateIds("inventoryLog", receivedItems.length);
@@ -98,18 +98,40 @@ export const receiveDeliveryItemsService = async (
         where: { id: received.deliveryItemId },
         data: {
           receivedQty: { increment: received.receivedQty },
-          // Only set expiryDate if provided — keeps existing date if not re-submitted
           ...(received.expiryDate !== undefined && {
             expiryDate: received.expiryDate ? new Date(received.expiryDate) : null,
           }),
         },
       });
 
+      // ── Upsert stock batch (handles partial receives on same item) ───────
+      const batchId = await generateId("stockBatch");
+      await tx.stockBatch.upsert({
+        where: { deliveryItemId: received.deliveryItemId },
+        create: {
+          id: batchId,
+          productId: deliveryItem.productId,
+          deliveryItemId: received.deliveryItemId,
+          quantity: received.receivedQty,
+          remaining: received.receivedQty,
+          expiryDate: received.expiryDate ? new Date(received.expiryDate) : null,
+        },
+        update: {
+          quantity:  { increment: received.receivedQty },
+          remaining: { increment: received.receivedQty },
+          ...(received.expiryDate !== undefined && {
+            expiryDate: received.expiryDate ? new Date(received.expiryDate) : null,
+          }),
+        },
+      });
+
+      // ── Update product stock ─────────────────────────────────────────────
       await tx.product.update({
         where: { id: deliveryItem.productId },
         data: { stock: { increment: received.receivedQty } },
       });
 
+      // ── Log inventory movement ───────────────────────────────────────────
       await tx.inventoryLog.create({
         data: {
           id: logIds[i],
@@ -185,6 +207,7 @@ export const getExpiredItemsService = async () => {
     orderBy: { expiryDate: "asc" },
   });
 };
+
 // Returns the earliest expiry date per product (for dashboard warnings)
 export const getProductExpiryStatusService = async () => {
   return await prisma.deliveryItem.groupBy({
