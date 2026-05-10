@@ -19,13 +19,22 @@ import lossReportRoutes from './routes/loss.routes';
 const app = express();
 const httpServer = createServer(app);
 
-const corsOptions = {
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://c-c-delta.vercel.app',
-    'https://my-app-phi-pearl-24.vercel.app',
-  ],
+// ✅ Allow any vercel.app subdomain + localhost
+const isAllowedOrigin = (origin: string | undefined): boolean => {
+  if (!origin) return true;
+  if (origin.startsWith('http://localhost')) return true;
+  if (origin.endsWith('.vercel.app')) return true;
+  return false;
+};
+
+const corsOptions: cors.CorsOptions = {
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS blocked: ${origin}`));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -36,10 +45,18 @@ app.use(express.json());
 
 export const io = new Server(httpServer, {
   cors: {
-    origin: corsOptions.origin,
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS blocked: ${origin}`));
+      }
+    },
     methods: ['GET', 'POST'],
     credentials: true,
   },
+  // ✅ Allow polling fallback in case WebSocket is blocked
+  transports: ['websocket', 'polling'],
 });
 
 io.on('connection', (socket) => {
@@ -53,10 +70,8 @@ io.on('connection', (socket) => {
       console.log(`${payload.role} ${payload.id} joined cashiers room`);
     }
 
-    // ── Debug: log all rooms this socket is in ──
     const rooms = Array.from(socket.rooms);
     console.log(`Socket ${socket.id} is in rooms:`, rooms);
-
     console.log(`User ${payload.id} joined their room`);
   });
 
@@ -65,7 +80,7 @@ io.on('connection', (socket) => {
   });
 });
 
-app.use('/api', (req, res, next) => {
+app.use('/api', (req: Request, res: Response, next: NextFunction) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
