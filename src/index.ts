@@ -96,7 +96,7 @@ app.use('/api/deliveries',   deliveryRoute);
 app.use('/api/cart',         cartRoutes);
 app.use('/api/promos',       promoRoutes);
 app.use('/api/orders',       orderRoutes);
-app.use('/api/inventory',    inventoryRoutes);
+app.use('/api/inventory-logs',    inventoryRoutes);
 app.use('/api/upload',       uploadRoutes);
 app.use('/api/returns',      returnRoutes);
 app.use('/api/loss-reports', lossReportRoutes);
