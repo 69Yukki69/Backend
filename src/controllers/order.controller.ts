@@ -211,33 +211,19 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       });
 
       // ── Real-time notifications ───────────────────────────────────────────
-      // ── Real-time notifications ───────────────────────────────────────────
-if (completedOrder?.customerId) {
+      if (completedOrder?.customerId) {
+        // Notify the customer
+        io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
+          orderId: id,
+          message: `🎉 Your order ${id} has been completed!`,
+        });
+      }
 
-  if (requester.role === 'CUSTOMER') {
-    // Customer marked as received → notify cashiers
-    io.to('cashiers').emit('order:completed', {
-      orderId: id,
-      message: `✅ Order ${id} has been received by the customer.`,
-    });
-    // Also confirm to the customer
-    io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
-      orderId: id,
-      message: `✅ You have confirmed receipt of order ${id}. Thank you!`,
-    });
-  } else {
-    // Cashier marked as completed → notify customer
-    io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
-      orderId: id,
-      message: `🎉 Your order ${id} has been completed!`,
-    });
-    // Also notify cashiers
-    io.to('cashiers').emit('order:completed', {
-      orderId: id,
-      message: `✅ Order ${id} has been marked as completed.`,
-    });
-  }
-}
+      // Notify cashiers/admins regardless of whether there's a customer
+      io.to('cashiers').emit('order:completed', {
+        orderId: id,
+        message: `✅ Order ${id} has been received by the customer.`,
+      });
 
       // ── Email ─────────────────────────────────────────────────────────────
       if (completedOrder?.customer?.email) {
