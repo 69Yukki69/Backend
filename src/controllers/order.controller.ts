@@ -210,31 +210,38 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
         },
       });
 
-      // ── Real-time notification ────────────────────────────────────────────
+      // ── Real-time notifications ───────────────────────────────────────────
       if (completedOrder?.customerId) {
+        // Notify the customer
         io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
           orderId: id,
           message: `🎉 Your order ${id} has been completed!`,
         });
+      }
 
-        // ── Email ─────────────────────────────────────────────────────────
-        if (completedOrder.customer?.email) {
-          try {
-            const result = await sendOrderCompletedEmail({
-              to:      'johnnerayteodoro0216@gmail.com',
-              orderId: id,
-              items:   completedOrder.orderLines.map((l) => ({
-                name:     l.product.productName,
-                quantity: l.quantity,
-                price:    l.price,
-              })),
-              total:         completedOrder.totalAmount,
-              paymentMethod: completedOrder.payment?.method ?? 'N/A',
-            });
-            console.log('✅ Email sent:', result);
-          } catch (err) {
-            console.error('❌ Email failed:', err);
-          }
+      // Notify cashiers/admins regardless of whether there's a customer
+      io.to('cashiers').emit('order:completed', {
+        orderId: id,
+        message: `✅ Order ${id} has been received by the customer.`,
+      });
+
+      // ── Email ─────────────────────────────────────────────────────────────
+      if (completedOrder?.customer?.email) {
+        try {
+          const result = await sendOrderCompletedEmail({
+            to:      'johnnerayteodoro0216@gmail.com',
+            orderId: id,
+            items:   completedOrder.orderLines.map((l) => ({
+              name:     l.product.productName,
+              quantity: l.quantity,
+              price:    l.price,
+            })),
+            total:         completedOrder.totalAmount,
+            paymentMethod: completedOrder.payment?.method ?? 'N/A',
+          });
+          console.log('✅ Email sent:', result);
+        } catch (err) {
+          console.error('❌ Email failed:', err);
         }
       }
 
@@ -264,6 +271,13 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           message: `❌ Your order ${id} has been cancelled.`,
         });
       }
+
+      // ── Notify cashiers ───────────────────────────────────────────────────
+      io.to('cashiers').emit('order:status', {
+        orderId: id,
+        status:  'CANCELLED',
+        message: `🚫 Order ${id} has been cancelled.`,
+      });
 
       return res.json({ message: 'Order cancelled and stock reservation released.' });
     }
