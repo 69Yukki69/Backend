@@ -185,6 +185,14 @@ export const getExpiredItemsService = async () => {
     orderBy: { expiryDate: "asc" },
   });
 };
+// Returns the earliest expiry date per product (for dashboard warnings)
+export const getProductExpiryStatusService = async () => {
+  return await prisma.deliveryItem.groupBy({
+    by: ["productId"],
+    _min: { expiryDate: true },
+    where: { expiryDate: { not: null } },
+  });
+};
 
 export const deleteDeliveryService = async (id: string) => {
   return await prisma.delivery.delete({

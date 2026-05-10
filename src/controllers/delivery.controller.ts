@@ -8,6 +8,7 @@ import {
   receiveDeliveryItemsService,
   getExpiringItemsService,
   getExpiredItemsService,
+  getProductExpiryStatusService, // ← ADDED
 } from "../util/delivery";
 import {
   createDeliverySchema,
@@ -62,17 +63,14 @@ export const updateDeliveryController = async (req: Request, res: Response) => {
 };
 
 // PATCH /deliveries/:id/receive
-// Body: { employeeId, items: [{ deliveryItemId, receivedQty, expiryDate? }] }
 export const receiveDeliveryController = async (req: Request, res: Response) => {
   try {
     const parsed = receiveDeliveryItemsSchema.parse(req.body);
-
     const result = await receiveDeliveryItemsService(
       getId(req),
       parsed.employeeId,
       parsed.items
     );
-
     res.json(result);
   } catch (error) {
     console.error("RECEIVE ERROR:", error);
@@ -83,7 +81,6 @@ export const receiveDeliveryController = async (req: Request, res: Response) => 
 };
 
 // GET /deliveries/expiring-soon?days=30
-// Returns items expiring within the next N days (default 30)
 export const getExpiringItemsController = async (req: Request, res: Response) => {
   try {
     const days = req.query.days ? parseInt(req.query.days as string) : 30;
@@ -95,13 +92,22 @@ export const getExpiringItemsController = async (req: Request, res: Response) =>
 };
 
 // GET /deliveries/expired
-// Returns items that are already past their expiry date
 export const getExpiredItemsController = async (req: Request, res: Response) => {
   try {
     const items = await getExpiredItemsService();
     res.json(items);
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch expired items" });
+  }
+};
+
+// GET /deliveries/expiry-status  ← ADDED
+export const getProductExpiryStatusController = async (_req: Request, res: Response) => {
+  try {
+    const data = await getProductExpiryStatusService();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch expiry status" });
   }
 };
 
