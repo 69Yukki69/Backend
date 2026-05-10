@@ -23,7 +23,7 @@ router.get("/expired", authMiddleware(["ADMIN", "STOCK_MANAGER"]), getExpiredIte
 router.get("/expiry-status", authMiddleware(["ADMIN", "STOCK_MANAGER"]), getProductExpiryStatusController); // ← ADD
 
 router.get("/:id", authMiddleware(["ADMIN", "STOCK_MANAGER"]), getDeliveryByIdController);
-router.put("/:id", authMiddleware(["ADMIN"]), updateDeliveryController);
+router.put("/:id", authMiddleware(["ADMIN", "STOCK_MANAGER"]), updateDeliveryController);
 router.delete("/:id", authMiddleware(["ADMIN"]), deleteDeliveryController);
 router.patch("/:id/receive", authMiddleware(["ADMIN", "STOCK_MANAGER"]), receiveDeliveryController);
 
