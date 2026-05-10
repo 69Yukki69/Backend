@@ -4,6 +4,6 @@ import { authMiddleware } from '../middleware/authMiddleware';
 
 const router = Router();
 
-router.get('/logs', authMiddleware(['ADMIN', 'CASHIER', 'EMPLOYEE', 'STOCK_MANAGER']), getInventoryLogs);
+router.get('/', authMiddleware(['ADMIN', 'CASHIER', 'EMPLOYEE', 'STOCK_MANAGER']), getInventoryLogs);
 
 export default router;
