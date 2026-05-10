@@ -16,8 +16,9 @@ export const createDeliverySchema = z.object({
 });
 
 export const updateDeliverySchema = z.object({
-  status: z.nativeEnum(OrderStatus).optional(), // <-- enum-aware validation
+  status: z.nativeEnum(OrderStatus).optional(),
   notes: z.string().optional(),
+  receiptNumber: z.string().optional(), // ← ADD THIS
 });
 
 export const receiveDeliveryItemsSchema = z.object({
