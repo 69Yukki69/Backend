@@ -277,14 +277,15 @@ model InventoryLog {
 }
 
 model Delivery {
-  id           String      @id
-  supplierId   String
-  deliveryDate DateTime
-  status       OrderStatus @default(PENDING)
-  totalItems   Int
-  notes        String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id            String      @id
+  supplierId    String
+  deliveryDate  DateTime
+  status        OrderStatus @default(PENDING)
+  totalItems    Int
+  receiptNumber String?     // ← supplier receipt / DR number
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   supplier Supplier       @relation(fields: [supplierId], references: [id])
   items    DeliveryItem[]
