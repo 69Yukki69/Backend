@@ -17,7 +17,7 @@ import returnRoutes     from './routes/return.routes';
 import lossReportRoutes from './routes/loss.routes';
 
 const app = express();
-const httpServer = createServer(app); // ← wrap express with http server
+const httpServer = createServer(app);
 
 const corsOptions = {
   origin: [
@@ -34,7 +34,6 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Socket.io (same CORS origins as Express)
 export const io = new Server(httpServer, {
   cors: {
     origin: corsOptions.origin,
@@ -47,14 +46,16 @@ io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
   socket.on('join', (payload: { id: string; role: string }) => {
-    // Customer joins their personal room
     socket.join(`user:${payload.id}`);
 
-    // Cashiers + admins join the cashiers room for new order notifications
     if (payload.role === 'CASHIER' || payload.role === 'ADMIN') {
       socket.join('cashiers');
       console.log(`${payload.role} ${payload.id} joined cashiers room`);
     }
+
+    // ── Debug: log all rooms this socket is in ──
+    const rooms = Array.from(socket.rooms);
+    console.log(`Socket ${socket.id} is in rooms:`, rooms);
 
     console.log(`User ${payload.id} joined their room`);
   });
@@ -71,24 +72,23 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-app.use('/api/employees',   employeeRoute);
-app.use('/api/suppliers',   supplierRoute);
-app.use('/api/customers',   customerRoute);
-app.use('/api/products',    productRoute);
-app.use('/api/deliveries',  deliveryRoute);
-app.use('/api/cart',        cartRoutes);
-app.use('/api/promos',      promoRoutes);
-app.use('/api/orders',      orderRoutes);
-app.use('/api/inventory',   inventoryRoutes);
-app.use('/api/upload',      uploadRoutes);
-app.use('/api/returns',     returnRoutes);
+app.use('/api/employees',    employeeRoute);
+app.use('/api/suppliers',    supplierRoute);
+app.use('/api/customers',    customerRoute);
+app.use('/api/products',     productRoute);
+app.use('/api/deliveries',   deliveryRoute);
+app.use('/api/cart',         cartRoutes);
+app.use('/api/promos',       promoRoutes);
+app.use('/api/orders',       orderRoutes);
+app.use('/api/inventory',    inventoryRoutes);
+app.use('/api/upload',       uploadRoutes);
+app.use('/api/returns',      returnRoutes);
 app.use('/api/loss-reports', lossReportRoutes);
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });
 });
 
-// ← httpServer instead of app.listen
 httpServer.listen(ENV.PORT || 5000, () => {
   console.log(`Server running on port ${ENV.PORT || 5000}`);
 });
