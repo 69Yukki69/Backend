@@ -1,5 +1,6 @@
 import prisma from "../config/db";
 import { generateId, generateIds } from "../util/generateId";
+import { createInventoryLog } from "../util/inventoryLogs";
 import { CreateDeliveryDTO, UpdateDeliveryDTO } from "../dto/delivery.dto";
 
 export const createDeliveryService = async (data: CreateDeliveryDTO) => {
@@ -32,14 +33,24 @@ export const createDeliveryService = async (data: CreateDeliveryDTO) => {
 export const getAllDeliveriesService = async () => {
   return await prisma.delivery.findMany({
     orderBy: { createdAt: "desc" },
-    include: { items: true, supplier: true },
+    include: {
+      items: {
+        include: { product: true }, // ← include product so frontend gets productName
+      },
+      supplier: true,
+    },
   });
 };
 
 export const getDeliveryByIdService = async (id: string) => {
   return await prisma.delivery.findUnique({
     where: { id },
-    include: { items: true, supplier: true },
+    include: {
+      items: {
+        include: { product: true },
+      },
+      supplier: true,
+    },
   });
 };
 
@@ -63,7 +74,11 @@ export const receiveDeliveryItemsService = async (
     expiryDate?: string | null;
   }[]
 ) => {
-  const logIds = await generateIds("inventoryLog", receivedItems.length);
+  // ── FIX: Do NOT pre-generate log IDs outside the transaction.
+  //    generateIds reads the DB max outside the tx, causing duplicate-ID
+  //    collisions under concurrency (or when inventoryLog uses seq-based IDs).
+  //    Instead, delegate to createInventoryLog() inside the tx — it uses the
+  //    auto-increment seq to assign a collision-free ID every time.
 
   return await prisma.$transaction(async (tx) => {
     const delivery = await tx.delivery.findUnique({
@@ -74,9 +89,7 @@ export const receiveDeliveryItemsService = async (
       throw new Error("Delivery not found");
     }
 
-    for (let i = 0; i < receivedItems.length; i++) {
-      const received = receivedItems[i];
-
+    for (const received of receivedItems) {
       const deliveryItem = await tx.deliveryItem.findFirst({
         where: { id: received.deliveryItemId, deliveryId },
       });
@@ -131,23 +144,28 @@ export const receiveDeliveryItemsService = async (
         data: { stock: { increment: received.receivedQty } },
       });
 
-      // ── Log inventory movement ───────────────────────────────────────────
-      await tx.inventoryLog.create({
-        data: {
-          id: logIds[i],
-          productId: deliveryItem.productId,
+      // ── FIX: use createInventoryLog() so ID is assigned via auto-increment
+      //    seq — same pattern used everywhere else in the codebase.
+      //    The old direct tx.inventoryLog.create with a pre-generated ID
+      //    was the source of silent transaction rollbacks.
+      await createInventoryLog(
+        {
+          productId:     deliveryItem.productId,
           employeeId,
-          quantity: received.receivedQty,
-          type: "STOCK_IN",
-          referenceId: deliveryId,
+          quantity:      received.receivedQty,
+          type:          "STOCK_IN",
+          reason:        "Received from supplier delivery",
+          referenceId:   deliveryId,
           referenceType: "DELIVERY",
         },
-      });
+        tx
+      );
     }
 
+    // ── Update delivery status based on received quantities ──────────────
     const allItems = await tx.deliveryItem.findMany({ where: { deliveryId } });
     const allFullyReceived = allItems.every((i) => i.receivedQty >= i.orderedQty);
-    const anyReceived = allItems.some((i) => i.receivedQty > 0);
+    const anyReceived      = allItems.some((i) => i.receivedQty > 0);
 
     await tx.delivery.update({
       where: { id: deliveryId },
@@ -162,7 +180,12 @@ export const receiveDeliveryItemsService = async (
 
     return tx.delivery.findUnique({
       where: { id: deliveryId },
-      include: { items: true, supplier: true },
+      include: {
+        items: {
+          include: { product: true },
+        },
+        supplier: true,
+      },
     });
   });
 };
