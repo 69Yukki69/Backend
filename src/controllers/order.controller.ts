@@ -211,19 +211,33 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       });
 
       // ── Real-time notifications ───────────────────────────────────────────
-      if (completedOrder?.customerId) {
-        // Notify the customer
-        io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
-          orderId: id,
-          message: `🎉 Your order ${id} has been completed!`,
-        });
-      }
+      // ── Real-time notifications ───────────────────────────────────────────
+if (completedOrder?.customerId) {
 
-      // Notify cashiers/admins regardless of whether there's a customer
-      io.to('cashiers').emit('order:completed', {
-        orderId: id,
-        message: `✅ Order ${id} has been received by the customer.`,
-      });
+  if (requester.role === 'CUSTOMER') {
+    // Customer marked as received → notify cashiers
+    io.to('cashiers').emit('order:completed', {
+      orderId: id,
+      message: `✅ Order ${id} has been received by the customer.`,
+    });
+    // Also confirm to the customer
+    io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
+      orderId: id,
+      message: `✅ You have confirmed receipt of order ${id}. Thank you!`,
+    });
+  } else {
+    // Cashier marked as completed → notify customer
+    io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
+      orderId: id,
+      message: `🎉 Your order ${id} has been completed!`,
+    });
+    // Also notify cashiers
+    io.to('cashiers').emit('order:completed', {
+      orderId: id,
+      message: `✅ Order ${id} has been marked as completed.`,
+    });
+  }
+}
 
       // ── Email ─────────────────────────────────────────────────────────────
       if (completedOrder?.customer?.email) {
@@ -371,7 +385,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
       payment:     sale.payment,
       orderLines:  sale.orderLines.map((line) => ({
         id:          line.id,
-        quantity:    line.quantity,
+        quantity:    line.quantity, 
         returnedQty: line.returnedQty,
         price:       line.price,
         product: {
