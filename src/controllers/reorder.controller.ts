@@ -7,13 +7,13 @@ import prisma from '../config/db';
 //   bufferDays  — safety stock buffer, in days of cover (default 7)
 export const getReorderSuggestions = async (req: Request, res: Response) => {
   try {
-    const windowDays = Math.max(1, Number(req.query.windowDays) || 30);
-    const bufferDays = Math.max(0, Number(req.query.bufferDays) || 7);
+    const windowDays  = Math.max(1, Number(req.query.windowDays) || 30);
+    const bufferDays  = Math.max(0, Number(req.query.bufferDays) || 7);
+    const supplierId  = req.query.supplierId as string | undefined; // ← new
 
     const since = new Date();
     since.setDate(since.getDate() - windowDays);
 
-    // Pull all relevant STOCK_OUT and RETURN_IN logs in the window, per product
     const logs = await prisma.inventoryLog.groupBy({
       by: ['productId', 'type'],
       where: {
@@ -23,7 +23,6 @@ export const getReorderSuggestions = async (req: Request, res: Response) => {
       _sum: { quantity: true },
     });
 
-    // Reduce into a map: productId -> { stockOut, returnIn }
     const salesMap = new Map<string, { stockOut: number; returnIn: number }>();
     for (const log of logs) {
       const entry = salesMap.get(log.productId) || { stockOut: 0, returnIn: 0 };
@@ -33,21 +32,16 @@ export const getReorderSuggestions = async (req: Request, res: Response) => {
       salesMap.set(log.productId, entry);
     }
 
-    // Pull product details for products that had any movement
     const productIds = Array.from(salesMap.keys());
     const products = await prisma.product.findMany({
-      where: { id: { in: productIds } },
+      where: {
+        id: { in: productIds },
+        ...(supplierId ? { supplierId } : {}), // ← new
+      },
       select: {
-        id: true,
-        productName: true,
-        category: true,
-        size: true,
-        price: true,
-        costPrice: true,
-        stock: true,
-        reservedStock: true,
-        piecesPerCase: true,
-        status: true,
+        id: true, productName: true, category: true, size: true,
+        price: true, costPrice: true, stock: true, reservedStock: true,
+        piecesPerCase: true, status: true,
       },
     });
 
