@@ -16,6 +16,7 @@ import uploadRoutes     from './routes/upload.routes';
 import returnRoutes     from './routes/return.routes';
 import lossReportRoutes from './routes/loss.routes';
 import stockBatchRoutes from './routes/stockBatch.routes';
+import reorderRoutes    from './routes/reorder.routes';
 
 const app = express();
 const httpServer = createServer(app);
@@ -101,6 +102,7 @@ app.use('/api/upload',       uploadRoutes);
 app.use('/api/returns',      returnRoutes);
 app.use('/api/loss-reports', lossReportRoutes);
 app.use('/api/stock-batches', stockBatchRoutes);
+app.use('/api/reorder',       reorderRoutes);
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });
