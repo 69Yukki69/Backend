@@ -2,7 +2,7 @@
 import { Resend } from 'resend';
 import { ENV } from '../config/env';
 
-const resend = new Resend(ENV.RESEND_API_KEY); // add this to your env
+const resend = new Resend(ENV.RESEND_API_KEY);
 
 interface OrderItem {
   name:     string;
