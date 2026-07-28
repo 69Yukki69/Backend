@@ -196,7 +196,7 @@ export const removeCartItem = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Failed to remove cart item', error: err });
   }
 };
-
+ 
 // CLEAR entire cart
 export const clearCart = async (req: Request, res: Response) => {
   try {
