@@ -21,6 +21,10 @@ import reorderRoutes    from './routes/reorder.routes';
 const app = express();
 const httpServer = createServer(app);
 
+httpServer.on('upgrade', (req) => {
+  console.log('🚨 RAW UPGRADE REQUEST HIT:', req.url);
+});
+
 console.log('🚨🚨🚨 BUILD MARKER — INDEX.TS VERSION 2 LOADED 🚨🚨🚨');
 
 // ✅ Allow any vercel.app subdomain + localhost
