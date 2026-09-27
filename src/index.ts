@@ -54,9 +54,11 @@ app.use(express.json());
 export const io = new Server(httpServer, {
   cors: {
     origin: (origin, callback) => {
+      console.log('🚨 SOCKET.IO CORS CHECK, origin:', origin);
       if (isAllowedOrigin(origin)) {
         callback(null, true);
       } else {
+        console.log('🚨 SOCKET.IO CORS REJECTED:', origin);
         callback(new Error(`CORS blocked: ${origin}`));
       }
     },
