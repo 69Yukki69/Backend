@@ -21,6 +21,8 @@ import reorderRoutes    from './routes/reorder.routes';
 const app = express();
 const httpServer = createServer(app);
 
+console.log('🚨🚨🚨 BUILD MARKER — INDEX.TS VERSION 2 LOADED 🚨🚨🚨');
+
 // ✅ Allow any vercel.app subdomain + localhost
 const isAllowedOrigin = (origin: string | undefined): boolean => {
   if (!origin) return true;
@@ -57,14 +59,15 @@ export const io = new Server(httpServer, {
     methods: ['GET', 'POST'],
     credentials: true,
   },
-  // ✅ Allow polling fallback in case WebSocket is blocked
   transports: ['websocket', 'polling'],
 });
 
 io.on('connection', (socket) => {
+  console.log('🚨🚨🚨 CONNECTION HANDLER FIRED 🚨🚨🚨');
   console.log(`Socket connected: ${socket.id}`);
 
   socket.on('join', (payload: { id: string; role: string }) => {
+    console.log('🚨🚨🚨 JOIN EVENT RECEIVED:', payload);
     socket.join(`user:${payload.id}`);
 
     if (payload.role === 'CASHIER' || payload.role === 'ADMIN') {
