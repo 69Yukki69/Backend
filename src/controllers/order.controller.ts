@@ -93,6 +93,7 @@ export const placeOrder = async (req: Request, res: Response) => {
     });
 
     // ── Notify cashiers of new order ──────────────────────────────────────────
+    console.log('🚨 EMITTING order:new to cashiers room');
     io.to('cashiers').emit('order:new', {
       orderId: result.id,
       message: `New order! Order ${result.id} is waiting for review.`,
