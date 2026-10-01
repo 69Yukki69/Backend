@@ -105,8 +105,8 @@ export const updateProduct = async (req: Request, res: Response) => {
         price: Number(price),
         costPrice: costPrice != null && costPrice !== '' ? Number(costPrice) : null,
         piecesPerCase: piecesPerCase ? parseInt(piecesPerCase, 10) : 1,
-        image: image || null,
-        barcode: barcode || null,
+        ...(image !== undefined && { image: image || null }),
+        ...(barcode !== undefined && { barcode: barcode || null }),
         status
       }
     });
