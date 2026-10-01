@@ -70,7 +70,7 @@ export const getProduct = async (req: Request, res: Response) => {
 
 export const createProduct = async (req: Request, res: Response) => {
   try {
-    const { productName, category, size, price, supplierId, image, barcode, status, piecesPerCase } = req.body;
+    const { productName, category, size, price, costPrice, supplierId, image, barcode, status, piecesPerCase } = req.body;
     const id = await generateId('product');
     const product = await prisma.product.create({
       data: {
@@ -79,6 +79,7 @@ export const createProduct = async (req: Request, res: Response) => {
         category,
         size: size || null,
         price: Number(price),
+        costPrice: costPrice != null && costPrice !== '' ? Number(costPrice) : null,
         supplierId,
         image: image || null,
         barcode: barcode || null,
@@ -94,7 +95,7 @@ export const createProduct = async (req: Request, res: Response) => {
 
 export const updateProduct = async (req: Request, res: Response) => {
   try {
-    const { productName, category, size, price, image, barcode, status, piecesPerCase } = req.body;
+    const { productName, category, size, price, costPrice, image, barcode, status, piecesPerCase } = req.body;
     const product = await prisma.product.update({
       where: { id: String(req.params.id) },
       data: {
@@ -102,6 +103,7 @@ export const updateProduct = async (req: Request, res: Response) => {
         category,
         size: size || null,
         price: Number(price),
+        costPrice: costPrice != null && costPrice !== '' ? Number(costPrice) : null,
         piecesPerCase: piecesPerCase ? parseInt(piecesPerCase, 10) : 1,
         image: image || null,
         barcode: barcode || null,
