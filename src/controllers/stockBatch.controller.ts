@@ -4,7 +4,8 @@ import {
   getExpiringBatchesService,
   getExpiredBatchesService,
   writeOffExpiredBatchesService,
-  getAllActiveBatchesService
+  getAllActiveBatchesService,
+  updateBatchExpiryService
 } from "../util/stockBatch";
 
 const getParam = (req: Request, key: string) => {
@@ -59,4 +60,23 @@ export const writeOffExpiredBatchesController = async (req: Request, res: Respon
 export const getAllActiveBatchesController = async (_req: Request, res: Response) => {
   try { res.json(await getAllActiveBatchesService()); }
   catch { res.status(500).json({ message: "Failed to fetch stock batches" }); }
+};
+
+export const updateBatchExpiryController = async (req: Request, res: Response) => {
+  try {
+    const id = getParam(req, "id");
+    const { expiryDate } = req.body;
+    if (expiryDate === undefined) return res.status(400).json({ message: "expiryDate is required (use null to clear)" });
+
+    let value: Date | null = null;
+    if (expiryDate !== null) {
+      value = new Date(expiryDate);
+      if (isNaN(value.getTime())) return res.status(400).json({ message: "Invalid expiryDate" });
+    }
+
+    res.json(await updateBatchExpiryService(id, value));
+  } catch (error: any) {
+    if (error.code === "P2025") return res.status(404).json({ message: "Stock batch not found" });
+    res.status(500).json({ message: "Failed to update expiry date" });
+  }
 };

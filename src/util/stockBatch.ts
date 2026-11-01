@@ -138,3 +138,6 @@ export const getAllActiveBatchesService = () =>
     orderBy: { expiryDate: "asc" },
     select: { id: true, productId: true, remaining: true, expiryDate: true, receivedAt: true },
   });
+
+  export const updateBatchExpiryService = async (id: string, expiryDate: Date | null) =>
+  prisma.stockBatch.update({ where: { id }, data: { expiryDate } });
