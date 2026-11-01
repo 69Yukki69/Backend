@@ -18,7 +18,7 @@ export const UpdateCustomerDto = z.object({
 });
 
 export const LoginCustomerDto = z.object({
-  name: z.string().min(1, "Name is required"),
+  email: z.string().min(1, "Email is required"),
   password: z.string().min(8, "minimumm is 8"),
 
 });

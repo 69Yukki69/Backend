@@ -21,6 +21,12 @@ import reorderRoutes    from './routes/reorder.routes';
 const app = express();
 const httpServer = createServer(app);
 
+httpServer.on('upgrade', (req) => {
+  console.log('🚨 RAW UPGRADE REQUEST HIT:', req.url);
+});
+
+console.log('🚨🚨🚨 BUILD MARKER — INDEX.TS VERSION 2 LOADED 🚨🚨🚨');
+
 // ✅ Allow any vercel.app subdomain + localhost
 const isAllowedOrigin = (origin: string | undefined): boolean => {
   if (!origin) return true;
@@ -48,23 +54,26 @@ app.use(express.json());
 export const io = new Server(httpServer, {
   cors: {
     origin: (origin, callback) => {
+      console.log('🚨 SOCKET.IO CORS CHECK, origin:', origin);
       if (isAllowedOrigin(origin)) {
         callback(null, true);
       } else {
+        console.log('🚨 SOCKET.IO CORS REJECTED:', origin);
         callback(new Error(`CORS blocked: ${origin}`));
       }
     },
     methods: ['GET', 'POST'],
     credentials: true,
   },
-  // ✅ Allow polling fallback in case WebSocket is blocked
-  transports: ['websocket', 'polling'],
+  transports: ["polling"],
 });
 
 io.on('connection', (socket) => {
+  console.log('🚨🚨🚨 CONNECTION HANDLER FIRED 🚨🚨🚨');
   console.log(`Socket connected: ${socket.id}`);
 
   socket.on('join', (payload: { id: string; role: string }) => {
+    console.log('🚨🚨🚨 JOIN EVENT RECEIVED:', payload);
     socket.join(`user:${payload.id}`);
 
     if (payload.role === 'CASHIER' || payload.role === 'ADMIN') {
@@ -107,7 +116,7 @@ app.use('/api/reorder',       reorderRoutes);
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });
 });
-
+ 
 httpServer.listen(ENV.PORT || 5000, () => {
   console.log(`Server running on port ${ENV.PORT || 5000}`);
 });

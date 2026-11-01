@@ -93,10 +93,10 @@ export const deleteCustomer = async (req: Request, res: Response) => {
 // LOGIN customer
 export const loginCustomer = async (req: Request, res: Response) => {
   try {
-    const { name, password } = req.body;
+    const { email, password } = req.body;
 
     const customer = await prisma.customer.findFirst({
-      where: { name }
+      where: { email }
     });
 
     if (!customer) {
@@ -119,7 +119,7 @@ export const loginCustomer = async (req: Request, res: Response) => {
       token,
       customer: {
         id: customer.id,
-        name: customer.name,
+        email: customer.email,
         role: "CUSTOMER"
       }
     });
