@@ -131,3 +131,10 @@ export const writeOffExpiredBatchesService = async (employeeId: string) => {
 
   return { written: expiredBatches.length, totalQty };
 };
+
+export const getAllActiveBatchesService = () =>
+  prisma.stockBatch.findMany({
+    where: { remaining: { gt: 0 } },
+    orderBy: { expiryDate: "asc" },
+    select: { id: true, productId: true, remaining: true, expiryDate: true, receivedAt: true },
+  });

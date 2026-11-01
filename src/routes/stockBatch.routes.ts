@@ -4,6 +4,7 @@ import {
   getExpiringBatchesController,
   getExpiredBatchesController,
   writeOffExpiredBatchesController,
+  getAllActiveBatchesController
 } from "../controllers/stockBatch.controller";
 import { authMiddleware } from "../middleware/authMiddleware";
 
@@ -14,5 +15,6 @@ router.get("/expiring",   authMiddleware(["ADMIN", "STOCK_MANAGER"]), getExpirin
 router.get("/expired",    authMiddleware(["ADMIN", "STOCK_MANAGER"]), getExpiredBatchesController);
 router.post("/write-off", authMiddleware(["ADMIN", "STOCK_MANAGER"]), writeOffExpiredBatchesController);
 router.get("/:productId", authMiddleware(["ADMIN", "STOCK_MANAGER"]), getStockBatchesByProductController);
+router.get("/", authMiddleware(["ADMIN", "STOCK_MANAGER"]), getAllActiveBatchesController);
 
 export default router;

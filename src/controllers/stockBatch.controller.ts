@@ -4,6 +4,7 @@ import {
   getExpiringBatchesService,
   getExpiredBatchesService,
   writeOffExpiredBatchesService,
+  getAllActiveBatchesService
 } from "../util/stockBatch";
 
 const getParam = (req: Request, key: string) => {
@@ -53,4 +54,9 @@ export const writeOffExpiredBatchesController = async (req: Request, res: Respon
   } catch (error) {
     res.status(500).json({ message: "Failed to write off expired batches" });
   }
+};
+
+export const getAllActiveBatchesController = async (_req: Request, res: Response) => {
+  try { res.json(await getAllActiveBatchesService()); }
+  catch { res.status(500).json({ message: "Failed to fetch stock batches" }); }
 };
