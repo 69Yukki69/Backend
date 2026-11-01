@@ -20,4 +20,4 @@ router.get('/',        authMiddleware(['ADMIN', 'STOCK_MANAGER']), getLossReport
 // POST  /loss-reports          — stock manager files a loss, admin can too
 router.post('/',       authMiddleware(['ADMIN', 'STOCK_MANAGER']), validate(FileLossReportDto), fileLossReport);
 
-export default router;
+export default router; 
