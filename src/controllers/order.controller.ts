@@ -359,6 +359,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
       where:   { customerId },
       orderBy: { createdAt: 'desc' },
       include: {
+        employee:   { select: { id: true, name: true } },   // ← cashier who handled the order
         orderLines: { include: { product: true } },
         payment:    true,
       },
@@ -367,6 +368,8 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
     const orders = sales.map((sale) => ({
       id:          sale.id,
       status:      sale.status,
+      employee:    sale.employee,                  // { id, name } | null
+      cashier:     sale.employee?.name ?? null,    // convenient flat field for receipts
       createdAt:   sale.createdAt,
       totalAmount: sale.totalAmount,
       payment:     sale.payment,
