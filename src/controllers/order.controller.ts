@@ -11,7 +11,7 @@ const round2   = (n: number) => Math.round(n * 100) / 100;
 
 // ── POST /orders ──────────────────────────────────────────────────────────────
 export const placeOrder = async (req: Request, res: Response) => {
-  const { customerId, paymentMethod, items } = req.body;
+  const { customerId, paymentMethod, items, cashGiven } = req.body;
   const requester = (req as any).user as { id: string; role: string };
 
   if (!customerId || !Array.isArray(items) || items.length === 0) {
@@ -76,14 +76,33 @@ export const placeOrder = async (req: Request, res: Response) => {
       const paymentId = await generateId('payment');
       const method    = paymentMethod === 'gcash' ? 'GCASH' : 'CASH';
 
+      // Cash: store what the customer will actually hand over and the change due.
+      // If the client sent no cashGiven (e.g. exact payment), fall back to exact cash.
+      let amountTendered: number | null = null;
+      let change: number | null = null;
+      if (method === 'CASH') {
+        const given = Number(cashGiven);
+        const hasGiven = cashGiven !== undefined && cashGiven !== null && cashGiven !== '' && Number.isFinite(given);
+        if (hasGiven) {
+          if (given + 0.005 < totalAmount) {
+            throw new Error('Cash given is less than the total amount.');
+          }
+          amountTendered = round2(given);
+          change         = round2(given - totalAmount);
+        } else {
+          amountTendered = totalAmount;
+          change         = 0;
+        }
+      }
+
       await tx.payment.create({
         data: {
           id:             paymentId,
           saleId:         sale.id,
           amount:         totalAmount,
           method,
-          amountTendered: method === 'CASH' ? totalAmount : null,
-          change:         method === 'CASH' ? 0 : null,
+          amountTendered,
+          change,
           paidAt:         new Date(),
         },
       });
@@ -114,6 +133,7 @@ export const placeOrder = async (req: Request, res: Response) => {
     }
     const isKnown =
       err?.message?.includes('Insufficient stock') ||
+      err?.message?.includes('Cash given') ||
       err?.message?.includes('not found');
     res.status(isKnown ? 400 : 500).json({ message: err?.message || 'Failed to place order.' });
   }
