@@ -6,6 +6,9 @@ import { io } from '../index';
 import { sendOrderCompletedEmail } from '../util/mailer';
 import { deductStockFIFOService } from '../util/stockBatch'; // ← ADDED
 
+const VAT_RATE = 0.12;
+const round2   = (n: number) => Math.round(n * 100) / 100;
+
 // ── POST /orders ──────────────────────────────────────────────────────────────
 export const placeOrder = async (req: Request, res: Response) => {
   const { customerId, paymentMethod, items } = req.body;
@@ -32,10 +35,12 @@ export const placeOrder = async (req: Request, res: Response) => {
       }
 
       // ── 2. Create the SaleRecord ────────────────────────────────────────────
-      const totalAmount = items.reduce(
+      // totalAmount is VAT-INCLUSIVE: subtotal + 12% VAT (rounded to centavos)
+      const subtotal = items.reduce(
         (sum: number, i: { price: number; quantity: number }) => sum + i.price * i.quantity,
         0
       );
+      const totalAmount = round2(subtotal + subtotal * VAT_RATE);
 
       const saleId = await generateId('saleRecord');
       const sale = await tx.saleRecord.create({
