@@ -2,6 +2,13 @@ import { Request, Response } from 'express';
 import prisma from '../config/db';
 import { generateId } from '../util/generateId';
 
+// The admin UI sends date-only strings ("2026-11-07"). Interpret them in
+// Philippine time so a promo runs from 00:00 on its first day through
+// 23:59:59.999 on its last day (instead of ending at 8 AM on the last day).
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const startOfDay = (v: string) => new Date(DATE_ONLY.test(v) ? `${v}T00:00:00+08:00` : v);
+const endOfDay   = (v: string) => new Date(DATE_ONLY.test(v) ? `${v}T23:59:59.999+08:00` : v);
+
 // GET all promotions
 export const getPromos = async (req: Request, res: Response) => {
   try {
@@ -70,8 +77,8 @@ export const createPromo = async (req: Request, res: Response) => {
         promoName,
         alteredPrice:    Number(alteredPrice),
         discountPercent: discountPercent ? Number(discountPercent) : null,
-        dateEffective:   new Date(dateEffective),
-        lastDate:        new Date(lastDate),
+        dateEffective:   startOfDay(String(dateEffective)),
+        lastDate:        endOfDay(String(lastDate)),
         isActive:        isActive ?? true,
       },
       include: { product: true }
@@ -97,10 +104,10 @@ export const updatePromo = async (req: Request, res: Response) => {
       where: { id: String(req.params.id) },
       data: {
         promoName,
-        alteredPrice:    alteredPrice    ? Number(alteredPrice)    : undefined,
-        discountPercent: discountPercent ? Number(discountPercent) : null,
-        dateEffective:   dateEffective   ? new Date(dateEffective) : undefined,
-        lastDate:        lastDate        ? new Date(lastDate)       : undefined,
+        alteredPrice:    alteredPrice    ? Number(alteredPrice)            : undefined,
+        discountPercent: discountPercent ? Number(discountPercent)         : null,
+        dateEffective:   dateEffective   ? startOfDay(String(dateEffective)) : undefined,
+        lastDate:        lastDate        ? endOfDay(String(lastDate))        : undefined,
         isActive:        isActive        ?? undefined,
       },
       include: { product: true }
