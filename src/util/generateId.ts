@@ -14,7 +14,7 @@ export type ModelName =
   | 'inventoryLog'
   | 'delivery'
   | 'deliveryItem'
-  | 'stockBatch'; // ← ADDED
+  | 'stockBatch';
 
 const prefixMap: Record<ModelName, string> = {
   employee:         'EMP',
@@ -30,7 +30,7 @@ const prefixMap: Record<ModelName, string> = {
   inventoryLog:     'LOG',
   delivery:         'DEL',
   deliveryItem:     'DLI',
-  stockBatch:       'BTH', // ← ADDED
+  stockBatch:       'BTH',
 };
 
 const getLastNumber = async (model: ModelName): Promise<number> => {

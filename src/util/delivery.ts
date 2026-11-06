@@ -3,31 +3,42 @@ import { generateId, generateIds } from "../util/generateId";
 import { createInventoryLog } from "../util/inventoryLogs";
 import { CreateDeliveryDTO, UpdateDeliveryDTO } from "../dto/delivery.dto";
 
-export const createDeliveryService = async (data: CreateDeliveryDTO) => {
-  const deliveryId = await generateId("delivery");
+const MAX_ID_RETRIES = 3;
 
-  return await prisma.delivery.create({
-    data: {
-      id: deliveryId,
-      supplierId: data.supplierId,
-      deliveryDate: new Date(data.deliveryDate),
-      totalItems: data.totalItems,
-      notes: data.notes,
-      items: {
-        create: await Promise.all(
-          data.items.map(async (item) => ({
-            id: await generateId("deliveryItem"),
-            productId: item.productId,
-            orderedQty: item.quantity,
-            receivedQty: 0,
-            returnedQty: 0,
-            costPrice: item.costPrice,
-          }))
-        ),
-      },
-    },
-    include: { items: true, supplier: true },
-  });
+export const createDeliveryService = async (data: CreateDeliveryDTO) => {
+  // generateId/generateIds read the current max ID from the DB and don't reserve it,
+  // so IDs must be allocated in ONE batch (never in parallel via Promise.all),
+  // and the insert is retried if a concurrent request grabbed the same number (P2002).
+  for (let attempt = 1; attempt <= MAX_ID_RETRIES; attempt++) {
+    try {
+      const deliveryId = await generateId("delivery");
+      const itemIds = await generateIds("deliveryItem", data.items.length);
+
+      return await prisma.delivery.create({
+        data: {
+          id: deliveryId,
+          supplierId: data.supplierId,
+          deliveryDate: new Date(data.deliveryDate),
+          totalItems: data.totalItems,
+          notes: data.notes,
+          items: {
+            create: data.items.map((item, i) => ({
+              id: itemIds[i],
+              productId: item.productId,
+              orderedQty: item.quantity,
+              receivedQty: 0,
+              returnedQty: 0,
+              costPrice: item.costPrice,
+            })),
+          },
+        },
+        include: { items: true, supplier: true },
+      });
+    } catch (e: any) {
+      if (e?.code !== "P2002" || attempt === MAX_ID_RETRIES) throw e;
+    }
+  }
+  throw new Error("Could not generate a unique delivery ID");
 };
 
 export const getAllDeliveriesService = async () => {
@@ -74,11 +85,10 @@ export const receiveDeliveryItemsService = async (
     expiryDate?: string | null;
   }[]
 ) => {
-  // ── FIX: Do NOT pre-generate log IDs outside the transaction.
-  //    generateIds reads the DB max outside the tx, causing duplicate-ID
-  //    collisions under concurrency (or when inventoryLog uses seq-based IDs).
-  //    Instead, delegate to createInventoryLog() inside the tx — it uses the
-  //    auto-increment seq to assign a collision-free ID every time.
+  // Allocate all stock batch IDs once, up front. generateId uses the global prisma
+  // client (not tx), so calling it inside the loop returns the same ID for every item.
+  // Unused IDs (when an item hits the upsert "update" branch) are harmless.
+  const batchIds = await generateIds("stockBatch", receivedItems.length);
 
   return await prisma.$transaction(async (tx) => {
     const delivery = await tx.delivery.findUnique({
@@ -89,7 +99,7 @@ export const receiveDeliveryItemsService = async (
       throw new Error("Delivery not found");
     }
 
-    for (const received of receivedItems) {
+    for (const [i, received] of receivedItems.entries()) {
       const deliveryItem = await tx.deliveryItem.findFirst({
         where: { id: received.deliveryItemId, deliveryId },
       });
@@ -118,11 +128,10 @@ export const receiveDeliveryItemsService = async (
       });
 
       // ── Upsert stock batch (handles partial receives on same item) ───────
-      const batchId = await generateId("stockBatch");
       await tx.stockBatch.upsert({
         where: { deliveryItemId: received.deliveryItemId },
         create: {
-          id: batchId,
+          id: batchIds[i],
           productId: deliveryItem.productId,
           deliveryItemId: received.deliveryItemId,
           quantity: received.receivedQty,
@@ -144,10 +153,7 @@ export const receiveDeliveryItemsService = async (
         data: { stock: { increment: received.receivedQty } },
       });
 
-      // ── FIX: use createInventoryLog() so ID is assigned via auto-increment
-      //    seq — same pattern used everywhere else in the codebase.
-      //    The old direct tx.inventoryLog.create with a pre-generated ID
-      //    was the source of silent transaction rollbacks.
+      // ── Inventory log (ID assigned via auto-increment seq inside the tx) ──
       await createInventoryLog(
         {
           productId:     deliveryItem.productId,
