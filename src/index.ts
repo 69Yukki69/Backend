@@ -25,13 +25,20 @@ httpServer.on('upgrade', (req) => {
   console.log('🚨 RAW UPGRADE REQUEST HIT:', req.url);
 });
 
-console.log('🚨🚨🚨 BUILD MARKER — INDEX.TS VERSION 2 LOADED 🚨🚨🚨');
+console.log('🚨🚨🚨 BUILD MARKER — INDEX.TS VERSION 3 LOADED 🚨🚨🚨');
 
-// ✅ Allow any vercel.app subdomain + localhost
+// ✅ Custom domain(s)
+const ALLOWED_ORIGINS = [
+  'https://julietasoftdrink.site',
+  'https://www.julietasoftdrink.site',
+];
+
+// ✅ Allow custom domain + any vercel.app subdomain + localhost
 const isAllowedOrigin = (origin: string | undefined): boolean => {
   if (!origin) return true;
   if (origin.startsWith('http://localhost')) return true;
   if (origin.endsWith('.vercel.app')) return true;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
   return false;
 };
 
@@ -116,7 +123,7 @@ app.use('/api/reorder',       reorderRoutes);
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });
 });
- 
+
 httpServer.listen(ENV.PORT || 5000, () => {
   console.log(`Server running on port ${ENV.PORT || 5000}`);
 });
