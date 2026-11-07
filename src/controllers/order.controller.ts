@@ -258,7 +258,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       if (completedOrder?.customer?.email) {
         try {
           const result = await sendOrderCompletedEmail({
-            to:      'johnnerayteodoro0216@gmail.com',
+            to:      completedOrder.customer.email, // ✅ customer's saved email
             orderId: id,
             items:   completedOrder.orderLines.map((l) => ({
               name:     l.product.productName,
