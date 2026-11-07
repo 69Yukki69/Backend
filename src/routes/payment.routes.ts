@@ -4,7 +4,6 @@ import { authMiddleware } from '../middleware/authMiddleware';
 
 const router = Router();
 
-// GET /api/payments/gcash-ref?ref=1234567890123 — cashier or admin
-router.get('/gcash-ref', authMiddleware(['ADMIN', 'CASHIER']), checkGcashRef);
+router.get('/gcash-ref', authMiddleware(['ADMIN', 'CASHIER', 'CUSTOMER']), checkGcashRef);
 
 export default router;
