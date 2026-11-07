@@ -98,6 +98,11 @@ enum CategoryType {
   OTHER
 }
 
+enum OrderType {
+  ONLINE
+  WALK_IN
+}
+
 // ==========================================
 // MODELS
 // ==========================================
@@ -186,6 +191,10 @@ model SaleRecord {
   discount    Float      @default(0)
   status      SaleStatus @default(PENDING)
   saleDate    DateTime   @default(now())
+  orderType     OrderType @default(ONLINE)
+  walkInName    String?
+  walkInPhone   String?
+  walkInAddress String?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
@@ -218,6 +227,7 @@ model Payment {
   method         PaymentMethod @default(CASH)
   amountTendered Float?
   change         Float?
+  referenceNo String? @unique
   paidAt         DateTime      @default(now())
   createdAt      DateTime      @default(now())
 
