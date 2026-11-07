@@ -1,5 +1,3 @@
-// Add this to your orders controller (or a new file next to it).
-// Imports match the ones already used in your order controller.
 import { Request, Response } from 'express';
 import prisma from '../config/db';
 import { generateId } from '../util/generateId';
@@ -8,20 +6,30 @@ const VAT_RATE = 0.12;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // ── POST /orders/walk-in  (cashier / admin only) ──────────────────────────────
-// Walk-in = customer without an account. The cashier fills the order, the
-// customer PAYS AT THE COUNTER, and the order is then delivered.
+// Order placed by staff at the counter. The customer PAYS AT THE COUNTER, and
+// the order is then delivered.
 //
-// This follows the same lifecycle as an online order:
+// Same lifecycle as an online order:
 //   PENDING → (PROCESSING) → OUT_FOR_DELIVERY → COMPLETED
 // Differences:
-//   - no customer account (customerId = null, details kept on the sale)
+//   - customerId is OPTIONAL:
+//       * New customer (no account)  → customerId = null, details kept on the sale
+//       * Existing customer          → order is linked to their account
 //   - payment is already collected when the order is created
 //   - the CASHIER marks it COMPLETED (see the guard in updateOrderStatus),
-//     because there is no customer account to confirm receipt
+//     because walk-in orders are completed by staff
 //   - stock is RESERVED now; it is deducted when the order is COMPLETED
-//     (existing FEFO + inventory log code, unchanged).
 export const placeWalkInOrder = async (req: Request, res: Response) => {
-  const { items, paymentMethod, cashGiven, gcashRef, walkInName, walkInPhone, walkInAddress } = req.body;
+  const {
+    items,
+    paymentMethod,
+    cashGiven,
+    gcashRef,
+    customerId,
+    walkInName,
+    walkInPhone,
+    walkInAddress,
+  } = req.body;
   const requester = (req as any).user as { id: string; role: string };
 
   if (!requester || requester.role === 'CUSTOMER') {
@@ -38,6 +46,18 @@ export const placeWalkInOrder = async (req: Request, res: Response) => {
   const address = String(walkInAddress ?? '').trim();
   if (!address) {
     return res.status(400).json({ message: 'Delivery address is required for walk-in orders.' });
+  }
+
+  // Link to an account only if the cashier picked an existing customer
+  let linkedCustomerId: string | null = null;
+  if (customerId) {
+    const customer = await prisma.customer.findUnique({
+      where: { id: String(customerId) },
+    });
+    if (!customer) {
+      return res.status(400).json({ message: 'Customer not found.' });
+    }
+    linkedCustomerId = customer.id;
   }
 
   // Merge duplicate products and validate quantities
@@ -113,7 +133,7 @@ export const placeWalkInOrder = async (req: Request, res: Response) => {
           data: {
             id: saleId,
             employeeId: requester.id,
-            customerId: null,
+            customerId: linkedCustomerId,
             orderType: 'WALK_IN',
             walkInName: name,
             walkInPhone: String(walkInPhone ?? '').trim() || null,
@@ -182,20 +202,3 @@ export const placeWalkInOrder = async (req: Request, res: Response) => {
     res.status(isKnown ? 400 : 500).json({ message: err?.message || 'Failed to place walk-in order.' });
   }
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PATCH to your EXISTING updateOrderStatus (orders controller).
-// Put this right after the "customers can only mark as COMPLETED or CANCELLED"
-// guard block. It makes COMPLETED a cashier action for walk-in orders only,
-// and keeps online orders confirmed by the customer who received them.
-//
-//   // ── Guard: staff can only complete WALK-IN orders ────────────────────────
-//   if (status === 'COMPLETED' && requester.role !== 'CUSTOMER' && order.orderType !== 'WALK_IN') {
-//     return res.status(403).json({
-//       message: 'Online orders can only be completed by the customer who received them.',
-//     });
-//   }
-//
-// Everything else in updateOrderStatus already works for walk-ins: socket
-// notifications and the email are skipped when customerId / customer.email is null.
-// ─────────────────────────────────────────────────────────────────────────────
