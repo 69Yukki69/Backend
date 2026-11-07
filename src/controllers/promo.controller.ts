@@ -57,10 +57,36 @@ export const getPromo = async (req: Request, res: Response) => {
   }
 };
 
+// ── helpers ───────────────────────────────────────────────────────────────────
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+// A discount must be a number from 1 to 99. Returns null when it is not valid.
+const parsePercent = (v: unknown): number | null => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 && n < 100 ? n : null;
+};
+
 // CREATE promotion
 export const createPromo = async (req: Request, res: Response) => {
   try {
-    const { productId, promoName, alteredPrice, discountPercent, dateEffective, lastDate, isActive } = req.body;
+    const { productId, promoName, discountPercent, dateEffective, lastDate, isActive } = req.body;
+
+    if (!productId) return res.status(400).json({ message: 'Please select a product.' });
+    if (!promoName) return res.status(400).json({ message: 'Promo title is required.' });
+    if (!dateEffective || !lastDate) {
+      return res.status(400).json({ message: 'Start and end dates are required.' });
+    }
+
+    const pct = parsePercent(discountPercent);
+    if (pct === null) {
+      return res.status(400).json({ message: 'Discount must be between 1 and 99 percent.' });
+    }
+
+    const start = startOfDay(String(dateEffective));
+    const end   = endOfDay(String(lastDate));
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+      return res.status(400).json({ message: 'Invalid dates. The start date must not be after the end date.' });
+    }
 
     // Validate product exists
     const product = await prisma.product.findUnique({ where: { id: String(productId) } });
@@ -75,47 +101,78 @@ export const createPromo = async (req: Request, res: Response) => {
         id,
         productId:       String(productId),
         promoName,
-        alteredPrice:    Number(alteredPrice),
-        discountPercent: discountPercent ? Number(discountPercent) : null,
-        dateEffective:   startOfDay(String(dateEffective)),
-        lastDate:        endOfDay(String(lastDate)),
+        // The promo price is worked out here from the product price,
+        // so it can never be 0 or out of step with the percentage.
+        alteredPrice:    round2(product.price * (1 - pct / 100)),
+        discountPercent: pct,
+        dateEffective:   start,
+        lastDate:        end,
         isActive:        isActive ?? true,
       },
       include: { product: true }
     });
 
     res.json(promo);
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to create promotion', error: err });
+  } catch (err: any) {
+    console.error('createPromo failed:', err);
+    if (err?.code === 'P2002') {
+      return res.status(409).json({ message: 'Could not create the promo (duplicate ID). Please try again.' });
+    }
+    res.status(500).json({ message: 'Failed to create promotion.' });
   }
 };
 
 // UPDATE promotion
 export const updatePromo = async (req: Request, res: Response) => {
   try {
-    const { promoName, alteredPrice, discountPercent, dateEffective, lastDate, isActive } = req.body;
+    const { promoName, discountPercent, dateEffective, lastDate, isActive } = req.body;
 
-    const existing = await prisma.promotionSale.findUnique({ where: { id: String(req.params.id) } });
+    const existing = await prisma.promotionSale.findUnique({
+      where:   { id: String(req.params.id) },
+      include: { product: true },
+    });
     if (!existing) {
       return res.status(404).json({ message: 'Promotion not found' });
+    }
+
+    // Only change the discount when a new one is sent; keep the price in step with it.
+    let pct: number | undefined;
+    let alteredPrice: number | undefined;
+    if (discountPercent !== undefined && discountPercent !== null && discountPercent !== '') {
+      const parsed = parsePercent(discountPercent);
+      if (parsed === null) {
+        return res.status(400).json({ message: 'Discount must be between 1 and 99 percent.' });
+      }
+      pct          = parsed;
+      alteredPrice = round2(existing.product.price * (1 - parsed / 100));
+    }
+
+    const start = dateEffective ? startOfDay(String(dateEffective)) : undefined;
+    const end   = lastDate      ? endOfDay(String(lastDate))        : undefined;
+    if ((start && isNaN(start.getTime())) || (end && isNaN(end.getTime()))) {
+      return res.status(400).json({ message: 'Invalid dates.' });
+    }
+    if ((start ?? existing.dateEffective) > (end ?? existing.lastDate)) {
+      return res.status(400).json({ message: 'The start date must not be after the end date.' });
     }
 
     const promo = await prisma.promotionSale.update({
       where: { id: String(req.params.id) },
       data: {
         promoName,
-        alteredPrice:    alteredPrice    ? Number(alteredPrice)            : undefined,
-        discountPercent: discountPercent ? Number(discountPercent)         : null,
-        dateEffective:   dateEffective   ? startOfDay(String(dateEffective)) : undefined,
-        lastDate:        lastDate        ? endOfDay(String(lastDate))        : undefined,
-        isActive:        isActive        ?? undefined,
+        alteredPrice,
+        discountPercent: pct,
+        dateEffective:   start,
+        lastDate:        end,
+        isActive:        isActive ?? undefined,
       },
       include: { product: true }
     });
 
     res.json(promo);
   } catch (err) {
-    res.status(500).json({ message: 'Failed to update promotion', error: err });
+    console.error('updatePromo failed:', err);
+    res.status(500).json({ message: 'Failed to update promotion.' });
   }
 };
 
