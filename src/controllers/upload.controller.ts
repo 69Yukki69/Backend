@@ -116,3 +116,38 @@ export const uploadCustomerImage = async (req: MulterRequest, res: Response) => 
     res.status(500).json({ message: 'Failed to upload customer image', error: err });
   }
 };
+
+// ── POST /api/upload/receipt   (cashier / admin only)  ← ADDED ───────────────
+// Uploads the GCash screenshot WITHOUT the 500x500 crop used for profile photos,
+// so the reference number stays readable. Returns the Cloudinary URL.
+export const uploadReceipt = async (req: MulterRequest, res: Response) => {
+  const user = (req as any).user as { id: string; role: string } | undefined;
+  if (!user || !['CASHIER', 'ADMIN'].includes(user.role)) {
+    return res.status(403).json({ message: 'Only cashiers and admins can upload receipts.' });
+  }
+  if (!req.file) return res.status(400).json({ message: 'No image file provided' });
+  if (!['image/jpeg', 'image/png'].includes(req.file.mimetype)) {
+    return res.status(400).json({ message: 'Only JPG or PNG receipts are allowed.' });
+  }
+  if (req.file.size > 5 * 1024 * 1024) {
+    return res.status(400).json({ message: 'Receipt must be 5MB or smaller.' });
+  }
+
+  try {
+    const receiptImage = await new Promise<string>((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream(
+        { folder: 'gcash-receipts', resource_type: 'image' },   // no crop
+        (err: UploadApiErrorResponse | undefined, result: UploadApiResponse | undefined) => {
+          if (err || !result) return reject(err ?? new Error('Upload failed'));
+          resolve(result.secure_url);
+        }
+      );
+      stream.end(req.file!.buffer);
+    });
+
+    res.json({ receiptImage });
+  } catch (err) {
+    console.error('Receipt upload failed:', err);
+    res.status(500).json({ message: 'Failed to upload receipt' });
+  }
+};

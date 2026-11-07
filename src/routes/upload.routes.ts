@@ -4,6 +4,7 @@ import {
   uploadProductImage,
   uploadEmployeeImage,
   uploadCustomerImage,
+  uploadReceipt,                                  // ← ADDED
 } from '../controllers/upload.controller';
 import { authMiddleware } from '../middleware/authMiddleware';
 
@@ -45,6 +46,14 @@ router.patch(
   authMiddleware(['ADMIN', 'CUSTOMER']),
   upload.single('image'),
   uploadCustomerImage
+);
+
+// POST /upload/receipt — cashier or admin (GCash receipt screenshot)   ← ADDED
+router.post(
+  '/receipt',
+  authMiddleware(['ADMIN', 'CASHIER']),
+  upload.single('image'),
+  uploadReceipt
 );
 
 export default router;

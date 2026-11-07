@@ -1,10 +1,8 @@
 import { Request, Response } from 'express';
 import prisma from '../config/db';
 import { generateId } from '../util/generateId';
-import { createInventoryLog } from '../util/inventoryLogs';
 import { io } from '../index';
-import { sendOrderCompletedEmail } from '../util/mailer';
-import { deductStockFIFOService } from '../util/stockBatch'; // ← ADDED
+import { completeSale } from '../util/saleCompletion';
 
 const VAT_RATE = 0.12;
 const round2   = (n: number) => Math.round(n * 100) / 100;
@@ -79,8 +77,6 @@ export const placeOrder = async (req: Request, res: Response) => {
       const paymentId = await generateId('payment');
       const method    = paymentMethod === 'gcash' ? 'GCASH' : 'CASH';
 
-      // Cash: store what the customer will actually hand over and the change due.
-      // If the client sent no cashGiven (e.g. exact payment), fall back to exact cash.
       let amountTendered: number | null = null;
       let change: number | null = null;
       if (method === 'CASH') {
@@ -142,6 +138,13 @@ export const placeOrder = async (req: Request, res: Response) => {
   }
 };
 
+// Allowed status transitions
+const ALLOWED_NEXT: Record<string, string[]> = {
+  PENDING:          ['PROCESSING', 'CANCELLED'],
+  PROCESSING:       ['OUT_FOR_DELIVERY', 'CANCELLED'],
+  OUT_FOR_DELIVERY: ['COMPLETED', 'CANCELLED'],
+};
+
 // ── PATCH /orders/:id/status ──────────────────────────────────────────────────
 export const updateOrderStatus = async (req: Request, res: Response) => {
   const id         = String(req.params.id);
@@ -155,8 +158,16 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     });
   }
 
+  // Only customers, cashiers and admins may change order status (not stock managers)
+  if (!['CUSTOMER', 'CASHIER', 'ADMIN'].includes(requester.role)) {
+    return res.status(403).json({ message: 'You are not allowed to update order status.' });
+  }
+
   try {
-    const order = await prisma.saleRecord.findUnique({ where: { id } });
+    const order = await prisma.saleRecord.findUnique({
+      where:   { id },
+      include: { payment: true },
+    });
     if (!order) return res.status(404).json({ message: 'Order not found.' });
 
     // ── Guard: terminal states cannot be changed ────────────────────────────
@@ -164,6 +175,13 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     if (terminalStates.includes(order.status)) {
       return res.status(400).json({
         message: `Order is already ${order.status} and cannot be updated.`,
+      });
+    }
+
+    // ── Guard: only valid forward transitions ───────────────────────────────
+    if (!ALLOWED_NEXT[order.status]?.includes(status)) {
+      return res.status(400).json({
+        message: `Cannot move an order from ${order.status} to ${status}.`,
       });
     }
 
@@ -177,132 +195,47 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           message: 'Customers can only mark orders as received (COMPLETED) or cancelled.',
         });
       }
+      // Paid GCash orders (and anything past PENDING) cannot be cancelled online
+      if (status === 'CANCELLED' && (order.status !== 'PENDING' || order.payment?.method === 'GCASH')) {
+        return res.status(403).json({
+          message: 'This order can no longer be cancelled online. Please contact the store.',
+        });
+      }
     }
 
     // ── Guard: staff cannot complete orders linked to a customer account ────
-    // Orders with an account (online, or walk-in for an existing customer) are
-    // completed by the customer who received them. Only orders with NO account
-    // (customerId = null) are completed by the cashier.
     if (status === 'COMPLETED' && requester.role !== 'CUSTOMER' && order.customerId) {
       return res.status(403).json({
         message: 'Orders linked to a customer account can only be completed by that customer.',
       });
     }
 
-    // ── COMPLETED: deduct stock, release reservation, write logs ─────────────
+    // ── COMPLETED: shared completion logic ───────────────────────────────────
     if (status === 'COMPLETED') {
-      await prisma.$transaction(async (tx) => {
-        const lines = await tx.orderLine.findMany({
-          where:   { saleId: id },
-          include: { product: true },
-        });
-
-        const logEmployeeId =
-          order.employeeId ??
-          (await tx.employee.findFirst({ where: { role: 'ADMIN' } }))?.id;
-
-        if (!logEmployeeId) throw new Error('No employee found to process the order.');
-
-        for (const line of lines) {
-          const product = await tx.product.findUnique({ where: { id: line.productId } });
-          if (!product) throw new Error(`Product not found: ${line.productId}`);
-
-          // ── FEFO batch deduction ─────────────────────────────────────────── ← ADDED
-          await deductStockFIFOService(tx, line.productId, line.quantity);
-
-          // ── Decrement stock + release reservation ────────────────────────────
-          await tx.product.update({
-            where: { id: line.productId },
-            data: {
-              stock:         { decrement: line.quantity },
-              reservedStock: { decrement: line.quantity },
-            },
-          });
-
-          await createInventoryLog(
-            {
-              productId:     line.productId,
-              employeeId:    logEmployeeId,
-              quantity:      -line.quantity,
-              type:          'STOCK_OUT',
-              reason:        requester.role === 'CUSTOMER'
-                               ? 'Order received by customer'
-                               : 'Order completed by cashier',
-              referenceId:   id,
-              referenceType: 'SALE',
-            },
-            tx
-          );
-        }
-
-        await tx.saleRecord.update({
-          where: { id },
-          data:  {
-            status: 'COMPLETED',
-            ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
-          },
-        });
-      });
-
-      // ── Fetch completed order for notification + email ────────────────────
-      const completedOrder = await prisma.saleRecord.findUnique({
-        where:   { id },
-        include: {
-          customer:   true,
-          orderLines: { include: { product: true } },
-          payment:    true,
-        },
-      });
-
-      // ── Real-time notifications ───────────────────────────────────────────
-      if (completedOrder?.customerId) {
-        io.to(`user:${completedOrder.customerId}`).emit('order:completed', {
-          orderId: id,
-          message: `🎉 Your order ${id} has been completed!`,
-        });
+      const by = requester.role === 'CUSTOMER' ? 'CUSTOMER' : 'CASHIER';
+      const ok = await completeSale(id, by, by === 'CASHIER' ? requester.id : undefined);
+      if (!ok) {
+        return res.status(409).json({ message: 'Order was already completed or cancelled.' });
       }
-
-      io.to('cashiers').emit('order:completed', {
-        orderId: id,
-        message: `✅ Order ${id} has been received by the customer.`,
-      });
-
-      // ── Email ─────────────────────────────────────────────────────────────
-      if (completedOrder?.customer?.email) {
-        try {
-          const result = await sendOrderCompletedEmail({
-            to:      completedOrder.customer.email, // ✅ customer's saved email
-            orderId: id,
-            items:   completedOrder.orderLines.map((l) => ({
-              name:     l.product.productName,
-              quantity: l.quantity,
-              price:    l.price,
-            })),
-            total:         completedOrder.totalAmount,
-            paymentMethod: completedOrder.payment?.method ?? 'N/A',
-          });
-          console.log('✅ Email sent:', result);
-        } catch (err) {
-          console.error('❌ Email failed:', err);
-        }
-      }
-
       return res.json({ message: 'Order marked as completed and stock deducted.' });
     }
 
     // ── CANCELLED: release reservation only ───────────────────────────────────
     if (status === 'CANCELLED') {
       await prisma.$transaction(async (tx) => {
-        const lines = await tx.orderLine.findMany({ where: { saleId: id } });
+        const claim = await tx.saleRecord.updateMany({
+          where: { id, status: order.status },
+          data:  { status: 'CANCELLED' },
+        });
+        if (claim.count === 0) throw new Error('Order status changed. Please refresh.');
 
+        const lines = await tx.orderLine.findMany({ where: { saleId: id } });
         for (const line of lines) {
           await tx.product.update({
             where: { id: line.productId },
             data:  { reservedStock: { decrement: line.quantity } },
           });
         }
-
-        await tx.saleRecord.update({ where: { id }, data: { status: 'CANCELLED' } });
       });
 
       if (order.customerId) {
@@ -322,14 +255,19 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       return res.json({ message: 'Order cancelled and stock reservation released.' });
     }
 
-    // ── All other transitions (PROCESSING, OUT_FOR_DELIVERY) ─────────────────
-    const updated = await prisma.saleRecord.update({
-      where: { id },
+    // ── PROCESSING, OUT_FOR_DELIVERY ─────────────────────────────────────────
+    const claim = await prisma.saleRecord.updateMany({
+      where: { id, status: order.status },   // guards against double clicks
       data:  {
         status,
+        ...(status === 'OUT_FOR_DELIVERY' && { outForDeliveryAt: new Date() }),
         ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
       },
     });
+    if (claim.count === 0) {
+      return res.status(409).json({ message: 'Order status changed. Please refresh.' });
+    }
+    const updated = await prisma.saleRecord.findUnique({ where: { id } });
 
     if (order.customerId) {
       const statusMessages: Record<string, string> = {
@@ -362,7 +300,7 @@ export const getActiveOrders = async (req: Request, res: Response) => {
         customer:   true,
         employee:   true,
         orderLines: { include: { product: true } },
-        payment:    true,   // ← ADDED: GCash reference / cash tendered for the cards
+        payment:    true,
       },
     });
     res.json(sales);
@@ -398,7 +336,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
       where:   { customerId },
       orderBy: { createdAt: 'desc' },
       include: {
-        employee:   { select: { id: true, name: true } },   
+        employee:   { select: { id: true, name: true } },
         orderLines: { include: { product: true } },
         payment:    true,
       },
@@ -407,8 +345,8 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
     const orders = sales.map((sale) => ({
       id:          sale.id,
       status:      sale.status,
-      employee:    sale.employee,                  
-      cashier:     sale.employee?.name ?? null,    
+      employee:    sale.employee,
+      cashier:     sale.employee?.name ?? null,
       createdAt:   sale.createdAt,
       totalAmount: sale.totalAmount,
       payment:     sale.payment,

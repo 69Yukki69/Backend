@@ -17,6 +17,8 @@ import returnRoutes     from './routes/return.routes';
 import lossReportRoutes from './routes/loss.routes';
 import stockBatchRoutes from './routes/stockBatch.routes';
 import reorderRoutes    from './routes/reorder.routes';
+import paymentRoutes    from './routes/payment.routes';               // ← ADDED
+import { startAutoCompleteJob } from './util/autoComplete';           // ← ADDED
 
 const app = express();
 const httpServer = createServer(app);
@@ -119,6 +121,7 @@ app.use('/api/returns',      returnRoutes);
 app.use('/api/loss-reports', lossReportRoutes);
 app.use('/api/stock-batches', stockBatchRoutes);
 app.use('/api/reorder',       reorderRoutes);
+app.use('/api/payments',      paymentRoutes);                         // ← ADDED
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });
@@ -126,4 +129,5 @@ app.get('/health', (req: Request, res: Response) => {
 
 httpServer.listen(ENV.PORT || 5000, () => {
   console.log(`Server running on port ${ENV.PORT || 5000}`);
+  startAutoCompleteJob();                                             // ← ADDED: 24h auto-complete
 });

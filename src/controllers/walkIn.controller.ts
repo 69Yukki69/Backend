@@ -6,18 +6,19 @@ const VAT_RATE = 0.12;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // ── POST /orders/walk-in  (cashier / admin only) ──────────────────────────────
-// Order placed by staff at the counter. The customer PAYS AT THE COUNTER, and
-// the order is then delivered.
+// Order placed by staff at the counter.
 //
-// Same lifecycle as an online order:
-//   PENDING → (PROCESSING) → OUT_FOR_DELIVERY → COMPLETED
-// Differences:
+// Lifecycle: PENDING → PROCESSING → OUT_FOR_DELIVERY → COMPLETED
+//
 //   - customerId is OPTIONAL:
-//       * New customer (no account)  → customerId = null, details kept on the sale
-//       * Existing customer          → order is linked to their account
-//   - payment is already collected when the order is created
-//   - the CASHIER marks it COMPLETED (see the guard in updateOrderStatus),
-//     because walk-in orders are completed by staff
+//       * No account       → customerId = null, details typed by the cashier and
+//                            kept on the sale. The CASHIER marks it COMPLETED.
+//       * Existing account → linked to the account (email required). Details are
+//                            taken from the account. Only the CUSTOMER can mark
+//                            it COMPLETED (or the system, 24h after dispatch).
+//   - CASH: paid at the counter.
+//   - GCASH: customer scans the QR, cashier verifies the payment, then enters the
+//            13-digit reference no. (unique) and uploads the receipt screenshot.
 //   - stock is RESERVED now; it is deducted when the order is COMPLETED
 export const placeWalkInOrder = async (req: Request, res: Response) => {
   const {
@@ -25,39 +26,46 @@ export const placeWalkInOrder = async (req: Request, res: Response) => {
     paymentMethod,
     cashGiven,
     gcashRef,
+    receiptImage,
     customerId,
     walkInName,
     walkInPhone,
     walkInAddress,
+    walkInStoreName,
   } = req.body;
   const requester = (req as any).user as { id: string; role: string };
 
-  if (!requester || requester.role === 'CUSTOMER') {
-    return res.status(403).json({ message: 'Only staff can place walk-in orders.' });
+  if (!requester || !['CASHIER', 'ADMIN'].includes(requester.role)) {
+    return res.status(403).json({ message: 'Only cashiers and admins can place walk-in orders.' });
   }
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: 'Cart is empty.' });
   }
 
-  const name = String(walkInName ?? '').trim();
+  // Existing customer: take details from the account, not from the form
+  let linkedCustomer: {
+    id: string; name: string; phone: string | null; address: string | null;
+  } | null = null;
+  if (customerId) {
+    const c = await prisma.customer.findUnique({ where: { id: String(customerId) } });
+    if (!c) return res.status(400).json({ message: 'Customer not found.' });
+    if (!c.email) {
+      return res.status(400).json({
+        message:
+          'This customer has no email on file, so they cannot confirm delivery. Please add one first.',
+      });
+    }
+    linkedCustomer = c;
+  }
+
+  const name    = linkedCustomer?.name    ?? String(walkInName ?? '').trim();
+  const address = linkedCustomer?.address ?? String(walkInAddress ?? '').trim();
+  const phone   = linkedCustomer?.phone   ?? (String(walkInPhone ?? '').trim() || null);
   if (!name) {
     return res.status(400).json({ message: 'Customer name is required for walk-in orders.' });
   }
-  const address = String(walkInAddress ?? '').trim();
   if (!address) {
     return res.status(400).json({ message: 'Delivery address is required for walk-in orders.' });
-  }
-
-  // Link to an account only if the cashier picked an existing customer
-  let linkedCustomerId: string | null = null;
-  if (customerId) {
-    const customer = await prisma.customer.findUnique({
-      where: { id: String(customerId) },
-    });
-    if (!customer) {
-      return res.status(400).json({ message: 'Customer not found.' });
-    }
-    linkedCustomerId = customer.id;
   }
 
   // Merge duplicate products and validate quantities
@@ -72,8 +80,13 @@ export const placeWalkInOrder = async (req: Request, res: Response) => {
 
   const method = paymentMethod === 'gcash' ? 'GCASH' : 'CASH';
   const ref = String(gcashRef ?? '').replace(/\D/g, '');
-  if (method === 'GCASH' && ref.length !== 13) {
-    return res.status(400).json({ message: 'A valid 13-digit GCash reference number is required.' });
+  if (method === 'GCASH') {
+    if (ref.length !== 13) {
+      return res.status(400).json({ message: 'A valid 13-digit GCash reference number is required.' });
+    }
+    if (!/^https:\/\/res\.cloudinary\.com\/[^/]+\/image\/upload\/.*gcash-receipts\/.+/.test(String(receiptImage ?? ''))) {
+      return res.status(400).json({ message: 'GCash receipt image is required.' });
+    }
   }
 
   try {
@@ -127,17 +140,18 @@ export const placeWalkInOrder = async (req: Request, res: Response) => {
           change = round2(given - totalAmount);
         }
 
-        // 3. Sale record: paid at the counter, starts as PENDING like an online order
+        // 3. Sale record: starts as PENDING
         const saleId = await generateId('saleRecord');
         const created = await tx.saleRecord.create({
           data: {
             id: saleId,
             employeeId: requester.id,
-            customerId: linkedCustomerId,
+            customerId: linkedCustomer?.id ?? null,
             orderType: 'WALK_IN',
             walkInName: name,
-            walkInPhone: String(walkInPhone ?? '').trim() || null,
+            walkInPhone: phone,
             walkInAddress: address,
+            walkInStoreName: linkedCustomer ? null : (String(walkInStoreName ?? '').trim() || null),
             totalAmount,
             discount: 0,
             status: 'PENDING',
@@ -162,7 +176,7 @@ export const placeWalkInOrder = async (req: Request, res: Response) => {
           });
         }
 
-        // 5. Payment (already collected)
+        // 5. Payment (already collected and verified by the cashier)
         await tx.payment.create({
           data: {
             id: await generateId('payment'),
@@ -171,7 +185,10 @@ export const placeWalkInOrder = async (req: Request, res: Response) => {
             method,
             amountTendered,
             change,
-            referenceNo: method === 'GCASH' ? ref : null,
+            referenceNo:  method === 'GCASH' ? ref : null,
+            receiptImage: method === 'GCASH' ? String(receiptImage) : null,
+            verifiedById: method === 'GCASH' ? requester.id : null,
+            verifiedAt:   method === 'GCASH' ? now : null,
             paidAt: now,
           },
         });
