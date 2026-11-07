@@ -87,3 +87,39 @@ export async function sendOrderCompletedEmail({
   console.log('Resend sent:', data);
   return data;
 }
+
+// ── OTP email ────────────────────────────────────────────────────────────────
+interface SendOtpEmailParams {
+  to:               string;
+  code:             string;
+  purpose:          'ACCOUNT_CREATION' | 'PASSWORD_CHANGE';
+  expiresInMinutes: number;
+}
+
+export async function sendOtpEmail({ to, code, purpose, expiresInMinutes }: SendOtpEmailParams) {
+  const title =
+    purpose === 'ACCOUNT_CREATION' ? 'Verify your new account' : 'Confirm your password change';
+
+  const { data, error } = await resend.emails.send({
+    from: FROM_EMAIL,
+    to,
+    ...(REPLY_TO ? { replyTo: REPLY_TO } : {}),
+    subject: `${code} is your verification code`,
+    html: `
+      <div style="font-family:sans-serif;max-width:480px;margin:auto">
+        <h2 style="color:#16a34a">${title}</h2>
+        <p>Use this code to continue:</p>
+        <p style="font-size:32px;font-weight:bold;letter-spacing:8px;margin:16px 0">${escapeHtml(code)}</p>
+        <p style="color:#6b7280;font-size:13px">
+          This code expires in ${expiresInMinutes} minutes. If you didn't request it, you can ignore this email.
+        </p>
+      </div>
+    `,
+  });
+
+  if (error) {
+    console.error('Resend OTP error:', error);
+    throw new Error(`Failed to send OTP email: ${error.message}`);
+  }
+  return data;
+}
