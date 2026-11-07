@@ -42,6 +42,7 @@ export async function reserveStock(
  * Release a reservation without deducting stock.
  * Used when an order is CANCELLED before completion.
  * quantity is in PIECES.
+ * reservedStock is clamped at 0 so a duplicate release can never make it negative.
  */
 export async function releaseReservation(
   tx: Prisma.TransactionClient,
@@ -50,10 +51,10 @@ export async function releaseReservation(
     quantity:  number;   // in pieces
   }
 ) {
-  return tx.product.update({
-    where: { id: params.productId },
-    data:  { reservedStock: { decrement: params.quantity } },
-  });
+  await tx.$executeRaw`
+    UPDATE "Product"
+    SET "reservedStock" = GREATEST("reservedStock" - ${params.quantity}, 0)
+    WHERE id = ${params.productId}`;
 }
 
 // ── STOCK MOVEMENTS ───────────────────────────────────────────────────────────
@@ -95,7 +96,7 @@ export async function stockIn(
 
 /**
  * STOCK OUT — sale completed, stock decreases.
- * Decrements both stock and reservedStock, appends a STOCK_OUT log.
+ * Decrements stock and reservedStock (clamped at 0), appends a STOCK_OUT log.
  * quantity is in PIECES.
  */
 export async function stockOut(
@@ -122,13 +123,11 @@ export async function stockOut(
     );
   }
 
-  await tx.product.update({
-    where: { id: params.productId },
-    data:  {
-      stock:         { decrement: params.quantity },
-      reservedStock: { decrement: params.quantity },
-    },
-  });
+  await tx.$executeRaw`
+    UPDATE "Product"
+    SET "stock" = "stock" - ${params.quantity},
+        "reservedStock" = GREATEST("reservedStock" - ${params.quantity}, 0)
+    WHERE id = ${params.productId}`;
 
   return createInventoryLog(
     {

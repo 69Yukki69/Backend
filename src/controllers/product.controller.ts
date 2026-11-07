@@ -12,7 +12,8 @@ export const getProducts = async (req: Request, res: Response) => {
 
     const stockMap = await getStockMany(products.map(p => p.id));
     const result = products.map(p => {
-      const stock = stockMap[p.id] ?? 0;
+      // Customers see what they can actually buy: stock minus reserved, never below 0
+      const stock = Math.max(0, (stockMap[p.id] ?? 0) - p.reservedStock);
       let finalPrice = p.price;
       const now = new Date();
       const activePromo = p.promotionSales.find(ps =>
@@ -45,7 +46,8 @@ export const getProduct = async (req: Request, res: Response) => {
     });
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
-    const stock = await getStock(product.id);
+    // Customers see what they can actually buy: stock minus reserved, never below 0
+    const stock = Math.max(0, (await getStock(product.id)) - product.reservedStock);
     const now = new Date();
     const activePromo = product.promotionSales.find(ps =>
       ps.isActive &&
