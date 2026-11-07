@@ -12,11 +12,26 @@ const round2   = (n: number) => Math.round(n * 100) / 100;
 
 // ── POST /orders ──────────────────────────────────────────────────────────────
 export const placeOrder = async (req: Request, res: Response) => {
-  const { customerId, paymentMethod, items, cashGiven } = req.body;
+  const { customerId, paymentMethod, items, cashGiven, gcashRef, receiptImage } = req.body;
   const requester = (req as any).user as { id: string; role: string };
 
   if (!customerId || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: 'Invalid order data.' });
+  }
+
+  // Customers can only order for themselves
+  if (requester.role === 'CUSTOMER' && requester.id !== customerId) {
+    return res.status(403).json({ message: 'You can only place orders for your own account.' });
+  }
+
+  // GCash orders need a typed 13-digit reference number and an uploaded receipt
+  if (paymentMethod === 'gcash') {
+    if (!/^\d{13}$/.test(String(gcashRef ?? ''))) {
+      return res.status(400).json({ message: 'A valid 13-digit GCash reference number is required.' });
+    }
+    if (!receiptImage || !String(receiptImage).startsWith('https://res.cloudinary.com/')) {
+      return res.status(400).json({ message: 'A GCash payment receipt is required.' });
+    }
   }
 
   try {
@@ -94,6 +109,11 @@ export const placeOrder = async (req: Request, res: Response) => {
         }
       }
 
+      if (method === 'GCASH') {
+        const dup = await tx.payment.findFirst({ where: { referenceNo: String(gcashRef) } });
+        if (dup) throw new Error('This GCash reference number was already used.');
+      }
+
       await tx.payment.create({
         data: {
           id:             paymentId,
@@ -103,6 +123,10 @@ export const placeOrder = async (req: Request, res: Response) => {
           amountTendered,
           change,
           paidAt:         new Date(),
+          ...(method === 'GCASH' && {
+            referenceNo:  String(gcashRef),
+            receiptImage: String(receiptImage),
+          }),
         },
       });
 
@@ -130,9 +154,13 @@ export const placeOrder = async (req: Request, res: Response) => {
         retryable: true,
       });
     }
+    if (err?.code === 'P2002') {
+      return res.status(400).json({ message: 'This GCash reference number was already used.' });
+    }
     const isKnown =
       err?.message?.includes('Insufficient stock') ||
       err?.message?.includes('Cash given') ||
+      err?.message?.includes('already used') ||
       err?.message?.includes('not found');
     res.status(isKnown ? 400 : 500).json({ message: err?.message || 'Failed to place order.' });
   }

@@ -122,8 +122,8 @@ export const uploadCustomerImage = async (req: MulterRequest, res: Response) => 
 // so the reference number stays readable. Returns the Cloudinary URL.
 export const uploadReceipt = async (req: MulterRequest, res: Response) => {
   const user = (req as any).user as { id: string; role: string } | undefined;
-  if (!user || !['CASHIER', 'ADMIN'].includes(user.role)) {
-    return res.status(403).json({ message: 'Only cashiers and admins can upload receipts.' });
+  if (!user || !['CUSTOMER', 'CASHIER', 'ADMIN'].includes(user.role)) {
+    return res.status(403).json({ message: 'You are not allowed to upload receipts.' });
   }
   if (!req.file) return res.status(400).json({ message: 'No image file provided' });
   if (!['image/jpeg', 'image/png'].includes(req.file.mimetype)) {
