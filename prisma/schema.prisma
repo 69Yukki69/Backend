@@ -103,6 +103,12 @@ enum OrderType {
   WALK_IN
 }
 
+enum CompletedBy {
+  CASHIER
+  CUSTOMER
+  SYSTEM
+}
+
 // ==========================================
 // MODELS
 // ==========================================
@@ -121,6 +127,7 @@ model Employee {
   saleRecords    SaleRecord[]
   inventoryLogs  InventoryLog[]
   returnRequests ReturnRequest[]
+  verifiedPayments Payment[] @relation("PaymentVerifier")
 }
 
 model Customer {
@@ -195,6 +202,10 @@ model SaleRecord {
   walkInName    String?
   walkInPhone   String?
   walkInAddress String?
+  walkInStoreName  String?        // missing for the no-account form
+  outForDeliveryAt DateTime?      // starts the 24h auto-complete clock
+  completedAt      DateTime?
+  completedBy      CompletedBy?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
@@ -203,6 +214,7 @@ model SaleRecord {
   orderLines     OrderLine[]
   payment        Payment?
   returnRequests ReturnRequest[]
+  @@index([status, outForDeliveryAt])
 }
 
 model OrderLine {
@@ -228,10 +240,14 @@ model Payment {
   amountTendered Float?
   change         Float?
   referenceNo String? @unique
+  receiptImage String?            // URL or path of the GCash screenshot
+  verifiedById String?            // cashier who checked the payment
+  verifiedAt   DateTime?
   paidAt         DateTime      @default(now())
   createdAt      DateTime      @default(now())
 
   saleRecord SaleRecord @relation(fields: [saleId], references: [id])
+  verifiedBy Employee? @relation("PaymentVerifier", fields: [verifiedById], references: [id])
 }
 
 model ShoppingCart {
