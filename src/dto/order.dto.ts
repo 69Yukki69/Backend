@@ -9,6 +9,10 @@ export const PlaceOrderDto = z.object({
 
   gcashRef: z.string().optional(),
 
+  receiptImage: z.string().optional(),
+
+  cashGiven: z.union([z.number().nonnegative(), z.string()]).optional(),
+
   note: z.string().optional(),
 
   items: z
@@ -25,6 +29,12 @@ export const PlaceOrderDto = z.object({
   {
     message: 'GCash reference number is required when paying via GCash',
     path:    ['gcashRef'],
+  }
+).refine(
+  (data) => data.paymentMethod !== 'gcash' || (data.receiptImage && data.receiptImage.trim().length > 0),
+  {
+    message: 'GCash payment receipt is required when paying via GCash',
+    path:    ['receiptImage'],
   }
 );
 
