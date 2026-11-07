@@ -356,3 +356,15 @@ model ReturnRequestItem {
   returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id])
   orderLine     OrderLine     @relation(fields: [orderLineId], references: [id])
 }
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  email     String
+  purpose   String   // 'ACCOUNT_CREATION' | 'PASSWORD_CHANGE'
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([email, purpose])
+}
