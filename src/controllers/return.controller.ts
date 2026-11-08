@@ -357,12 +357,26 @@ export const getReturnRequests = async (req: Request, res: Response) => {
         take:    limit,
         orderBy: { createdAt: 'desc' },
         include: {
-          customer: { select: { id: true, name: true } },
+          customer: { select: { id: true, name: true, phone: true, email: true, image: true } },
           reviewer: { select: { id: true, name: true, role: true } },
+          saleRecord: {
+            select: { id: true, status: true, totalAmount: true, saleDate: true, createdAt: true },
+          },
           items: {
             include: {
               orderLine: {
-                include: { product: { select: { productName: true, piecesPerCase: true } } },
+                include: {
+                  product: {
+                    select: {
+                      id: true,
+                      productName: true,
+                      size: true,
+                      image: true,
+                      category: true,
+                      piecesPerCase: true,
+                    },
+                  },
+                },
               },
             },
           },
