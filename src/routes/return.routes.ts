@@ -13,7 +13,7 @@ const router = Router();
 router.post('/',     authMiddleware(['ADMIN', 'CUSTOMER']), submitReturnRequest);
 
 // PATCH  /returns/:id     — employee approves or rejects a return request
-router.patch('/:id', authMiddleware(['ADMIN', 'STOCK_MANAGER']),             reviewReturnRequest);
+router.patch('/:id', authMiddleware(['ADMIN', 'CASHIER']),             reviewReturnRequest);
 
 // GET    /returns         — list return requests with filters
 router.get('/',      authMiddleware(['ADMIN', 'CASHIER', 'STOCK_MANAGER', 'CUSTOMER']), getReturnRequests);
