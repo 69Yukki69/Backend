@@ -8,9 +8,11 @@ import { generateId } from '../util/generateId';
 export const getEmployees = async (req: Request, res: Response) => {
   try {
     const employees = await prisma.employee.findMany({
-      where:{role: {
-        in: ['CASHIER', 'STOCK_MANAGER']
-      }}
+      where: {
+        role: {
+          in: ['CASHIER', 'STOCK_MANAGER', 'DRIVER']
+        }
+      }
     });
     res.json(employees);
   } catch (err) {
@@ -38,8 +40,13 @@ export const createEmployee = async (req: Request, res: Response) => {
   try {
     const { name, password, role, phone } = req.body;
 
+    // ✅ Drivers don't log in, so they don't need a password
+    if (role !== 'DRIVER' && (!password || password.length < 8)) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+    }
+
     const id = await generateId('employee');
-    const hashPassword = await bcrypt.hash(password, 10);
+    const hashPassword = role === 'DRIVER' ? null : await bcrypt.hash(password, 10);
 
     const employee = await prisma.employee.create({
       data: {
@@ -107,6 +114,11 @@ export const loginEmployee = async (req: Request, res: Response) => {
       return res.status(403).json({ message: 'Account is inactive or suspended.' });
     }
 
+    // ✅ Drivers (no password) cannot log in
+    if (!employee.hashPassword) {
+      return res.status(403).json({ message: 'This account cannot log in.' });
+    }
+
     const isPasswordValid = await bcrypt.compare(password, employee.hashPassword);
     if (!isPasswordValid) {
       return res.status(401).json({ message: 'Invalid password' });
@@ -154,13 +166,18 @@ export const loginAdmin = async (req: Request, res: Response) => {
       return res.status(403).json({ message: 'Account is inactive or suspended.' });
     }
 
+    // ✅ Guard against a missing password hash
+    if (!employee.hashPassword) {
+      return res.status(403).json({ message: 'This account cannot log in.' });
+    }
+
     const isPasswordValid = await bcrypt.compare(password, employee.hashPassword);
     if (!isPasswordValid) {
       return res.status(401).json({ message: 'Invalid password' });
     }
 
     const token = jwt.sign(
-      { id: employee.id, role: employee.role, status: employee.userStatus }, // ✅ added status
+      { id: employee.id, role: employee.role, status: employee.userStatus },
       process.env.JWT_SECRET || 'secret',
       { expiresIn: '1d' }
     );

@@ -19,6 +19,7 @@ enum Role {
   ADMIN
   CASHIER
   STOCK_MANAGER
+  DRIVER
 }
 
 enum UserStatus {
@@ -116,7 +117,7 @@ enum CompletedBy {
 model Employee {
   id           String     @id
   name         String     @unique
-  hashPassword String
+  hashPassword String?
   phone        String     @unique
   role         Role
   image        String?
