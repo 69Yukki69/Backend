@@ -125,7 +125,8 @@ model Employee {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  saleRecords    SaleRecord[]
+  saleRecords  SaleRecord[] @relation("SaleCashier")   // renamed relation
+  deliveries   SaleRecord[] @relation("SaleDriver")
   inventoryLogs  InventoryLog[]
   returnRequests ReturnRequest[]
   verifiedPayments Payment[] @relation("PaymentVerifier")
@@ -194,6 +195,7 @@ model Product {
 model SaleRecord {
   id          String     @id
   employeeId  String?
+  driverId    String?
   customerId  String?
   totalAmount Float
   discount    Float      @default(0)
@@ -210,12 +212,14 @@ model SaleRecord {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  employee       Employee?       @relation(fields: [employeeId], references: [id])
+  employee Employee? @relation("SaleCashier", fields: [employeeId], references: [id])
+  driver   Employee? @relation("SaleDriver",  fields: [driverId],   references: [id])
   customer       Customer?       @relation(fields: [customerId], references: [id])
   orderLines     OrderLine[]
   payment        Payment?
   returnRequests ReturnRequest[]
   @@index([status, outForDeliveryAt])
+  @@index([driverId])
 }
 
 model OrderLine {

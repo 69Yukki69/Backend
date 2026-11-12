@@ -7,6 +7,8 @@ import { completeSale } from '../util/saleCompletion';
 const VAT_RATE = 0.12;
 const round2   = (n: number) => Math.round(n * 100) / 100;
 
+const DRIVER_SELECT = { id: true, name: true, phone: true } as const;
+
 // NOTE: placeWalkInOrder lives in walkIn.controller.ts (that is the one the
 // /orders/walk-in route uses). The duplicate copy that used to be here was removed.
 
@@ -173,11 +175,30 @@ const ALLOWED_NEXT: Record<string, string[]> = {
   OUT_FOR_DELIVERY: ['COMPLETED', 'CANCELLED'],
 };
 
+// ── GET /orders/drivers ───────────────────────────────────────────────────────
+// Active drivers the cashier can pick from before dispatching an order.
+export const getDrivers = async (req: Request, res: Response) => {
+  const requester = (req as any).user as { id: string; role: string };
+  if (!['CASHIER', 'ADMIN'].includes(requester.role)) {
+    return res.status(403).json({ message: 'Not allowed.' });
+  }
+  try {
+    const drivers = await prisma.employee.findMany({
+      where:   { role: 'DRIVER', userStatus: 'ACTIVE' },
+      select:  DRIVER_SELECT,
+      orderBy: { name: 'asc' },
+    });
+    res.json(drivers);
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || 'Failed to fetch drivers.' });
+  }
+};
+
 // ── PATCH /orders/:id/status ──────────────────────────────────────────────────
 export const updateOrderStatus = async (req: Request, res: Response) => {
-  const id         = String(req.params.id);
-  const { status } = req.body;
-  const requester  = (req as any).user as { id: string; role: string };
+  const id                 = String(req.params.id);
+  const { status, driverId } = req.body;
+  const requester          = (req as any).user as { id: string; role: string };
 
   const validStatuses = ['PENDING', 'PROCESSING', 'OUT_FOR_DELIVERY', 'COMPLETED', 'CANCELLED'];
   if (!validStatuses.includes(status)) {
@@ -238,6 +259,23 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       });
     }
 
+    // ── Guard: a driver must be picked before dispatch ──────────────────────
+    let driverForDispatch: { id: string; name: string; phone: string } | null = null;
+    if (status === 'OUT_FOR_DELIVERY') {
+      if (!driverId) {
+        return res.status(400).json({
+          message: 'Select a driver before sending the order out for delivery.',
+        });
+      }
+      driverForDispatch = await prisma.employee.findFirst({
+        where:  { id: String(driverId), role: 'DRIVER', userStatus: 'ACTIVE' },
+        select: DRIVER_SELECT,
+      });
+      if (!driverForDispatch) {
+        return res.status(400).json({ message: 'Invalid or inactive driver.' });
+      }
+    }
+
     // ── COMPLETED: shared completion logic ───────────────────────────────────
     if (status === 'COMPLETED') {
       const by = requester.role === 'CUSTOMER' ? 'CUSTOMER' : 'CASHIER';
@@ -284,23 +322,31 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
     }
 
     // ── PROCESSING, OUT_FOR_DELIVERY ─────────────────────────────────────────
+    // The driver is only written when moving to OUT_FOR_DELIVERY, and that
+    // status is only reachable once (from PROCESSING), so it can't be reassigned.
     const claim = await prisma.saleRecord.updateMany({
       where: { id, status: order.status },   // guards against double clicks
       data:  {
         status,
-        ...(status === 'OUT_FOR_DELIVERY' && { outForDeliveryAt: new Date() }),
+        ...(status === 'OUT_FOR_DELIVERY' && {
+          outForDeliveryAt: new Date(),
+          driverId:         driverForDispatch!.id,
+        }),
         ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
       },
     });
     if (claim.count === 0) {
       return res.status(409).json({ message: 'Order status changed. Please refresh.' });
     }
-    const updated = await prisma.saleRecord.findUnique({ where: { id } });
+    const updated = await prisma.saleRecord.findUnique({
+      where:   { id },
+      include: { driver: { select: DRIVER_SELECT } },
+    });
 
     if (order.customerId) {
       const statusMessages: Record<string, string> = {
         PROCESSING:       `⚙️ Your order ${id} is now being processed!`,
-        OUT_FOR_DELIVERY: `🚚 Your order ${id} is out for delivery!`,
+        OUT_FOR_DELIVERY: `🚚 Your order ${id} is out for delivery with ${driverForDispatch?.name}!`,
       };
       const message = statusMessages[status];
       if (message) {
@@ -308,6 +354,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           orderId: id,
           status,
           message,
+          driver: driverForDispatch ?? undefined,
         });
       }
     }
@@ -325,8 +372,9 @@ export const getActiveOrders = async (req: Request, res: Response) => {
       where:   { status: { notIn: ['COMPLETED', 'CANCELLED', 'REFUNDED', 'PARTIALLY_RETURNED'] } },
       orderBy: { createdAt: 'desc' },
       include: {
-        customer:   true,
-        employee:   true,
+        customer:   { select: { id: true, name: true, phone: true, address: true } },
+        employee:   { select: { id: true, name: true } },
+        driver:     { select: DRIVER_SELECT },
         orderLines: { include: { product: true } },
         payment:    true,
       },
@@ -344,8 +392,9 @@ export const getAllCompletedOrders = async (req: Request, res: Response) => {
       where:   { status: 'COMPLETED' },
       orderBy: { createdAt: 'desc' },
       include: {
-        customer:   true,
-        employee:   true,
+        customer:   { select: { id: true, name: true, phone: true, address: true } },
+        employee:   { select: { id: true, name: true } },
+        driver:     { select: DRIVER_SELECT },
         orderLines: { include: { product: true } },
         payment:    true,
       },
@@ -365,6 +414,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
       include: {
         employee:   { select: { id: true, name: true } },
+        driver:     { select: DRIVER_SELECT },
         orderLines: { include: { product: true } },
         payment:    true,
       },
@@ -375,6 +425,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
       status:      sale.status,
       employee:    sale.employee,
       cashier:     sale.employee?.name ?? null,
+      driver:      sale.driver,                 // { id, name, phone } | null
       createdAt:   sale.createdAt,
       totalAmount: sale.totalAmount,
       payment:     sale.payment,

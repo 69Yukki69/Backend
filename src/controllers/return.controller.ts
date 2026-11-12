@@ -18,6 +18,9 @@ const RETURN_LOSS_REASON_MAP: Record<ReturnReason, LossReason | null> = {
 const VALID_RETURN_REASONS = Object.keys(RETURN_LOSS_REASON_MAP) as ReturnReason[];
 const RETURNABLE_STATUSES  = ['COMPLETED', 'PARTIALLY_RETURNED'];
 
+// Driver who delivered the order — shown on return requests for accountability
+const DRIVER_SELECT = { id: true, name: true, phone: true } as const;
+
 // ── POST /returns ─────────────────────────────────────────────────────────────
 /**
  * SUBMIT RETURN REQUEST (Customer)
@@ -114,7 +117,10 @@ export const submitReturnRequest = async (req: Request, res: Response) => {
             })),
           },
         },
-        include: { items: true },
+        include: {
+          items: true,
+          saleRecord: { select: { driver: { select: DRIVER_SELECT } } },
+        },
       });
     });
 
@@ -360,7 +366,10 @@ export const getReturnRequests = async (req: Request, res: Response) => {
           customer: { select: { id: true, name: true, phone: true, email: true, image: true } },
           reviewer: { select: { id: true, name: true, role: true } },
           saleRecord: {
-            select: { id: true, status: true, totalAmount: true, saleDate: true, createdAt: true },
+            select: {
+              id: true, status: true, totalAmount: true, saleDate: true, createdAt: true,
+              driver: { select: DRIVER_SELECT },
+            },
           },
           items: {
             include: {
@@ -411,7 +420,12 @@ export const getReturnRequestById = async (req: Request, res: Response) => {
       include: {
         customer:   { select: { id: true, name: true, email: true } },
         reviewer:   { select: { id: true, name: true, role: true } },
-        saleRecord: { select: { id: true, status: true, totalAmount: true } },
+        saleRecord: {
+          select: {
+            id: true, status: true, totalAmount: true,
+            driver: { select: DRIVER_SELECT },
+          },
+        },
         items: {
           include: {
             orderLine: {
