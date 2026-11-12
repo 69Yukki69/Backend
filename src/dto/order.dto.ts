@@ -43,6 +43,8 @@ export const UpdateOrderStatusDto = z.object({
     ['PENDING', 'PROCESSING', 'OUT_FOR_DELIVERY', 'COMPLETED', 'PARTIALLY_RETURNED', 'CANCELLED', 'REFUNDED'],
     { error: 'Invalid order status' }
   ),
+  // Required by the controller only when status is OUT_FOR_DELIVERY
+  driverId: z.string().min(1).optional(),
 });
 
 export type PlaceOrderType        = z.infer<typeof PlaceOrderDto>;
