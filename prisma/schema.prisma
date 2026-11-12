@@ -110,6 +110,12 @@ enum CompletedBy {
   SYSTEM
 }
 
+enum OrderRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 // ==========================================
 // MODELS
 // ==========================================
@@ -130,6 +136,8 @@ model Employee {
   inventoryLogs  InventoryLog[]
   returnRequests ReturnRequest[]
   verifiedPayments Payment[] @relation("PaymentVerifier")
+  orderRequests         OrderRequest[] @relation("OrderRequestRequester")
+  reviewedOrderRequests OrderRequest[] @relation("OrderRequestReviewer")
 }
 
 model Customer {
@@ -164,6 +172,7 @@ model Supplier {
 
   products   Product[]
   deliveries Delivery[]
+  orderRequests OrderRequest[]
 }
 
 model Product {
@@ -190,6 +199,7 @@ model Product {
   inventoryLogs     InventoryLog[]
   deliveryItems     DeliveryItem[]
   stockBatches      StockBatch[]       // ← ADDED
+  orderRequestItems OrderRequestItem[]
 }
 
 model SaleRecord {
@@ -322,6 +332,7 @@ model Delivery {
 
   supplier Supplier       @relation(fields: [supplierId], references: [id])
   items    DeliveryItem[]
+  orderRequest OrderRequest?
 }
 
 model DeliveryItem {
@@ -398,4 +409,39 @@ model OtpCode {
   createdAt DateTime @default(now())
 
   @@index([email, purpose])
+}
+
+model OrderRequest {
+  id            String             @id @default(uuid())
+  supplierId    String
+  requestedById String
+  status        OrderRequestStatus @default(PENDING)
+  notes         String?
+  adminRemarks  String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  deliveryId    String?            @unique   // the PO created on approval
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  supplier    Supplier           @relation(fields: [supplierId],    references: [id])
+  requestedBy Employee           @relation("OrderRequestRequester", fields: [requestedById], references: [id])
+  reviewedBy  Employee?          @relation("OrderRequestReviewer",  fields: [reviewedById],  references: [id])
+  delivery    Delivery?          @relation(fields: [deliveryId],    references: [id])
+  items       OrderRequestItem[]
+
+  @@index([status, createdAt])
+}
+
+model OrderRequestItem {
+  id             String   @id @default(cuid())
+  orderRequestId String
+  productId      String
+  quantity       Int
+  costPrice      Float
+  unit           String?
+  createdAt      DateTime @default(now())
+
+  orderRequest OrderRequest @relation(fields: [orderRequestId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id])
 }
