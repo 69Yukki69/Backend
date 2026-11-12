@@ -78,9 +78,17 @@ enum ReturnReason {
 }
 
 enum ReturnRequestStatus {
-  PENDING
-  APPROVED
+  PENDING     // customer submitted, waiting for cashier
+  APPROVED    // cashier approved, waiting for the customer to bring the items
   REJECTED
+  COMPLETED   // items received and inspected, stock / loss recorded
+  CANCELLED   // approved, but the customer never brought the items
+}
+
+enum ReturnCondition {
+  RESELLABLE  // goes back to stock
+  DAMAGED     // loss, not restocked
+  EXPIRED     // loss, not restocked
 }
 
 enum OrderStatus {
@@ -379,6 +387,9 @@ model ReturnRequest {
   reviewedBy String?
   reviewedAt DateTime?
   reviewNote String?
+  closedById String?             // cashier who received the items or cancelled the request
+  closedAt   DateTime?
+  closeNote  String?
   createdAt  DateTime            @default(now())
   updatedAt  DateTime            @updatedAt
 
@@ -393,6 +404,8 @@ model ReturnRequestItem {
   returnRequestId String
   orderLineId     String
   returnQty       Int
+  receivedQty     Int?             // pieces the customer actually brought back
+  condition       ReturnCondition? // cashier's inspection result
   createdAt       DateTime @default(now())
 
   returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id])
