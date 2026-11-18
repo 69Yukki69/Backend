@@ -56,10 +56,16 @@ enum SaleStatus {
 
 enum LogType {
   STOCK_IN        // delivery received → stock increases
-  STOCK_OUT       // sale completed → stock decreases
-  ADJUSTMENT      // manual correction (loss report)
-  RETURN_IN       // customer return → stock increases
+  STOCK_OUT       // sale completed / wrong-item replacement dispatched → stock decreases
+  ADJUSTMENT      // manual correction (loss report) / damaged-expired replacement dispatched
+  RETURN_IN       // resellable returned items collected → stock increases
   RETURN_OUT      // return to supplier → stock decreases
+}
+
+// Unit of InventoryLog.quantity
+enum LogUnit {
+  CASE            // default (all existing logs)
+  PIECE           // return / replacement logs
 }
 
 enum LossReason {
@@ -71,18 +77,19 @@ enum LossReason {
 }
 
 enum ReturnReason {
-  WRONG_ITEM_SENT   // resellable → stock +=, RETURN_IN log only
-  DAMAGED           // loss → RETURN_IN + ADJUSTMENT (LossReason.DAMAGED)
-  EXPIRED           // loss → RETURN_IN + ADJUSTMENT (LossReason.EXPIRED)
-  OTHER             // loss → RETURN_IN + ADJUSTMENT (LossReason.OTHER)
+  WRONG_ITEM_SENT   // replacement dispatch → STOCK_OUT; collected items usually resellable
+  DAMAGED           // replacement dispatch → ADJUSTMENT (LossReason.DAMAGED)
+  EXPIRED           // replacement dispatch → ADJUSTMENT (LossReason.EXPIRED)
+  OTHER             // replacement dispatch → ADJUSTMENT (LossReason.OTHER)
 }
 
 enum ReturnRequestStatus {
-  PENDING     // customer submitted, waiting for cashier
-  APPROVED    // cashier approved, waiting for the customer to bring the items
-  REJECTED
-  COMPLETED   // items received and inspected, stock / loss recorded
-  CANCELLED   // approved, but the customer never brought the items
+  PENDING           // customer submitted with photo proof, waiting for cashier
+  APPROVED          // cashier approved: active transaction, replacement being prepared
+  OUT_FOR_DELIVERY  // replacement dispatched with a driver: inventory deducted here
+  REJECTED          // cashier rejected (final)
+  COMPLETED         // replacement delivered, bad items collected
+  CANCELLED         // cashier cancelled before dispatch
 }
 
 enum ReturnCondition {
@@ -142,7 +149,8 @@ model Employee {
   saleRecords  SaleRecord[] @relation("SaleCashier")   // renamed relation
   deliveries   SaleRecord[] @relation("SaleDriver")
   inventoryLogs  InventoryLog[]
-  returnRequests ReturnRequest[]
+  reviewedReturns  ReturnRequest[] @relation("ReturnReviewer")
+  returnDeliveries ReturnRequest[] @relation("ReturnDriver")
   verifiedPayments Payment[] @relation("PaymentVerifier")
   orderRequests         OrderRequest[] @relation("OrderRequestRequester")
   reviewedOrderRequests OrderRequest[] @relation("OrderRequestReviewer")
@@ -191,7 +199,8 @@ model Product {
   barcode       String?       @unique
   price         Float
   costPrice     Float?
-  stock         Int           @default(0)
+  stock         Int           @default(0)   // FULL CASES
+  loosePieces   Int           @default(0)   // bottles from an opened case, always < piecesPerCase
   reservedStock Int           @default(0)
   piecesPerCase Int           @default(1)
   image         String?
@@ -316,6 +325,7 @@ model InventoryLog {
   productId     String
   employeeId    String
   quantity      Int
+  unit          LogUnit     @default(CASE)   // unit of `quantity`
   type          LogType
   reason        String?
   lossReason    LossReason?
@@ -384,10 +394,14 @@ model ReturnRequest {
   customerId String
   reason     ReturnReason
   status     ReturnRequestStatus @default(PENDING)
+  proofImages String[]           // Cloudinary URLs of the photo proof (1–5)
   reviewedBy String?
   reviewedAt DateTime?
   reviewNote String?
-  closedById String?             // cashier who received the items or cancelled the request
+  driverId         String?       // driver delivering the replacement
+  outForDeliveryAt DateTime?     // set at dispatch
+  stockDeductedAt  DateTime?     // set at dispatch: inventory was deducted (idempotency guard)
+  closedById String?             // who completed / cancelled the request
   closedAt   DateTime?
   closeNote  String?
   createdAt  DateTime            @default(now())
@@ -395,17 +409,21 @@ model ReturnRequest {
 
   saleRecord SaleRecord          @relation(fields: [saleId], references: [id])
   customer   Customer            @relation(fields: [customerId], references: [id])
-  reviewer   Employee?           @relation(fields: [reviewedBy], references: [id])
+  reviewer   Employee?           @relation("ReturnReviewer", fields: [reviewedBy], references: [id])
+  driver     Employee?           @relation("ReturnDriver",   fields: [driverId],   references: [id])
   items      ReturnRequestItem[]
+
+  @@index([status, createdAt])
+  @@index([driverId])
 }
 
 model ReturnRequestItem {
   id              String   @id @default(uuid())
   returnRequestId String
   orderLineId     String
-  returnQty       Int
-  receivedQty     Int?             // pieces the customer actually brought back
-  condition       ReturnCondition? // cashier's inspection result
+  returnQty       Int              // pieces to replace
+  receivedQty     Int?             // pieces actually collected from the customer
+  condition       ReturnCondition? // condition of the collected items
   createdAt       DateTime @default(now())
 
   returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id])
