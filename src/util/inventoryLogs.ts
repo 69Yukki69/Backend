@@ -1,13 +1,14 @@
 import prisma from '../config/db';
-import { LogType,LossReason, Prisma } from '../generated/prisma/client';
+import { LogType, LossReason, LogUnit, Prisma } from '../generated/prisma/client';
 
 type CreateInventoryLogParams = {
   productId: string;
   employeeId: string;
   quantity: number;
   type: LogType;
+  unit?: LogUnit;           // CASE (default) or PIECE: the unit of quantity
   reason?: string;
-  lossReason?:   LossReason; 
+  lossReason?:   LossReason;
   referenceId?: string;
   referenceType?: string;
 };
@@ -19,7 +20,7 @@ export async function createInventoryLog(
   const run = async (t: Prisma.TransactionClient) => {
     // Step 1: insert with TEMP id (seq auto-assigned by DB)
     const temp = await t.inventoryLog.create({
-      data: { id: 'TEMP_' + Date.now() + '_' + Math.random().toString(36).slice(2), ...data },
+      data: { id: 'TEMP' + Date.now() + '' + Math.random().toString(36).slice(2), ...data },
     });
 
     // Step 2: update id using the auto-assigned seq

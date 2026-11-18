@@ -5,17 +5,22 @@ import prisma from '../config/db';
 // Query params:
 //   windowDays  — sales lookback period (default 30)
 //   bufferDays  — safety stock buffer, in days of cover (default 7)
+//
+// UNITS: Product.stock and normal sale logs are in CASES. Return/replacement logs are in
+// PIECES (InventoryLog.unit = 'PIECE'). Pieces are converted to cases below so everything
+// in this report is in cases.
 export const getReorderSuggestions = async (req: Request, res: Response) => {
   try {
     const windowDays  = Math.max(1, Number(req.query.windowDays) || 30);
     const bufferDays  = Math.max(0, Number(req.query.bufferDays) || 7);
-    const supplierId  = req.query.supplierId as string | undefined; // ← new
+    const supplierId  = req.query.supplierId as string | undefined;
 
     const since = new Date();
     since.setDate(since.getDate() - windowDays);
 
+    // Group by unit too, so cases and pieces are never added together
     const logs = await prisma.inventoryLog.groupBy({
-      by: ['productId', 'type'],
+      by: ['productId', 'type', 'unit'],
       where: {
         createdAt: { gte: since },
         type: { in: ['STOCK_OUT', 'RETURN_IN'] },
@@ -23,12 +28,24 @@ export const getReorderSuggestions = async (req: Request, res: Response) => {
       _sum: { quantity: true },
     });
 
-    const salesMap = new Map<string, { stockOut: number; returnIn: number }>();
+    const salesMap = new Map<string, {
+      stockOutCases: number; stockOutPieces: number;
+      returnInCases: number; returnInPieces: number;
+    }>();
+
     for (const log of logs) {
-      const entry = salesMap.get(log.productId) || { stockOut: 0, returnIn: 0 };
+      const entry = salesMap.get(log.productId) || {
+        stockOutCases: 0, stockOutPieces: 0, returnInCases: 0, returnInPieces: 0,
+      };
       const qty = log._sum.quantity || 0;
-      if (log.type === 'STOCK_OUT') entry.stockOut += qty;
-      if (log.type === 'RETURN_IN') entry.returnIn += qty;
+      const isPiece = log.unit === 'PIECE';
+
+      if (log.type === 'STOCK_OUT') {
+        if (isPiece) entry.stockOutPieces += qty; else entry.stockOutCases += qty;
+      }
+      if (log.type === 'RETURN_IN') {
+        if (isPiece) entry.returnInPieces += qty; else entry.returnInCases += qty;
+      }
       salesMap.set(log.productId, entry);
     }
 
@@ -36,7 +53,7 @@ export const getReorderSuggestions = async (req: Request, res: Response) => {
     const products = await prisma.product.findMany({
       where: {
         id: { in: productIds },
-        ...(supplierId ? { supplierId } : {}), // ← new
+        ...(supplierId ? { supplierId } : {}),
       },
       select: {
         id: true, productName: true, category: true, size: true,
@@ -47,7 +64,14 @@ export const getReorderSuggestions = async (req: Request, res: Response) => {
 
     const suggestions = products.map((p) => {
       const movement = salesMap.get(p.id)!;
-      const netUnitsSold = Math.max(0, movement.stockOut - movement.returnIn);
+      const perCase  = Math.max(1, p.piecesPerCase);
+
+      // Everything in cases. Stock-out logs are stored as negative numbers in some code paths
+      // and positive in others, so take the absolute value of each total.
+      const stockOut = Math.abs(movement.stockOutCases) + Math.abs(movement.stockOutPieces) / perCase;
+      const returnIn = Math.abs(movement.returnInCases) + Math.abs(movement.returnInPieces) / perCase;
+
+      const netUnitsSold = Math.max(0, stockOut - returnIn);
       const dailyVelocity = netUnitsSold / windowDays;
 
       const availableStock = p.stock - p.reservedStock;
@@ -80,7 +104,7 @@ export const getReorderSuggestions = async (req: Request, res: Response) => {
         size: p.size,
         stock: p.stock,
         availableStock,
-        netUnitsSold,
+        netUnitsSold: Number(netUnitsSold.toFixed(2)),
         dailyVelocity: Number(dailyVelocity.toFixed(2)),
         reorderPoint: Number(reorderPoint.toFixed(2)),
         daysOfStockLeft,
