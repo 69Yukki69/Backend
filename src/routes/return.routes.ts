@@ -8,6 +8,7 @@ import {
   getReturnRequests,
   getActiveReturns,
   getReturnRequestById,
+  confirmReplacementReceived,
 } from '../controllers/return.controller';
 import { authMiddleware } from '../middleware/authMiddleware';
 
@@ -37,5 +38,7 @@ router.patch('/:id/cancel', authMiddleware(['ADMIN', 'CASHIER']), cancelReturnRe
 
 // PATCH  /returns/:id          — cashier approves or rejects a pending request
 router.patch('/:id', authMiddleware(['ADMIN', 'CASHIER']), reviewReturnRequest);
+
+router.patch('/returns/:id/received', authMiddleware(['CASHIER', 'CUSTOMER']), confirmReplacementReceived);
 
 export default router;

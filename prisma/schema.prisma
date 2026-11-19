@@ -428,6 +428,7 @@ model ReturnRequestItem {
   orderLineId     String
   returnQty       Int              // pieces to replace
   receivedQty     Int?             // pieces actually collected from the customer
+  receivedAt DateTime?  
   condition       ReturnCondition? // condition of the collected items
   createdAt       DateTime @default(now())
 

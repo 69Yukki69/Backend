@@ -977,3 +977,78 @@ export const getReturnRequestById = async (req: Request, res: Response) => {
     sendError(res, err, 'Failed to fetch return request.');
   }
 };
+
+// ── PATCH /returns/:id/received ───────────────────────────────────────────────
+/**
+ * CUSTOMER CONFIRMS THE REPLACEMENT ARRIVED (Customer only)
+ *
+ * OUT_FOR_DELIVERY stays the status; we only stamp `receivedAt`.
+ * The driver/cashier then calls PATCH /returns/:id/complete to record the
+ * collected bad items (restocking RESELLABLE ones), which moves it to COMPLETED.
+ *
+ * Why not complete here? completeReturn restocks collected bottles, and only the
+ * driver/cashier can say what was physically collected and in what condition.
+ *
+ * Paste into controllers/returnRequest.controller.ts (uses its existing imports/helpers).
+ */
+export const confirmReplacementReceived = async (req: Request, res: Response) => {
+  const returnRequestId = String(req.params.id);
+  const user            = (req as any).user as { id: string; role: string };
+
+  if (user.role !== 'CUSTOMER') {
+    return res.status(403).json({ message: 'Only the customer can confirm receipt.' });
+  }
+
+  try {
+    const returnRequest = await prisma.$transaction(async (tx) => {
+      // Atomic claim: owner + still out for delivery + not confirmed yet
+      const claim = await tx.returnRequest.updateMany({
+        where: {
+          id:         returnRequestId,
+          customerId: user.id,
+          status:     'OUT_FOR_DELIVERY',
+          receivedAt: null,
+        },
+        data: { receivedAt: new Date() },
+      });
+
+      if (claim.count === 0) {
+        const existing = await tx.returnRequest.findUnique({
+          where:  { id: returnRequestId },
+          select: { status: true, customerId: true, receivedAt: true },
+        });
+        if (!existing || existing.customerId !== user.id) {
+          throw new ReturnError('Return request not found.', 404);
+        }
+        if (existing.receivedAt) {
+          throw new ReturnError('You already confirmed receiving this replacement.', 409);
+        }
+        throw new ReturnError(
+          `You can confirm only after the replacement is out for delivery. Current status: ${existing.status}.`,
+          409
+        );
+      }
+
+      return tx.returnRequest.findUnique({
+        where:   { id: returnRequestId },
+        include: { items: { include: ITEM_INCLUDE }, driver: { select: DRIVER_SELECT } },
+      });
+    });
+
+    const rr = returnRequest!;
+    const staffMsg =
+      `📦 Customer confirmed receiving replacement ${shortId(rr.id)}. Collect the bad items to complete it.`;
+
+    io.to('cashiers').emit('return:received', { returnId: rr.id, message: staffMsg });
+    if (rr.driverId) {
+      io.to(`user:${rr.driverId}`).emit('return:received', { returnId: rr.id, message: staffMsg });
+    }
+
+    res.json({
+      message: 'Thanks! Replacement receipt confirmed.',
+      returnRequest: withBreakdown(rr),
+    });
+  } catch (err) {
+    sendError(res, err, 'Failed to confirm replacement receipt.');
+  }
+};
