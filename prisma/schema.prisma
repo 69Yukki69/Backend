@@ -405,6 +405,7 @@ model ReturnRequest {
   reviewNote String?
   driverId         String?       // driver delivering the replacement
   outForDeliveryAt DateTime?     // set at dispatch
+  receivedAt DateTime?  
   stockDeductedAt  DateTime?     // set at dispatch: inventory was deducted (idempotency guard)
   closedById String?             // who completed / cancelled the request
   closedAt   DateTime?
@@ -428,7 +429,6 @@ model ReturnRequestItem {
   orderLineId     String
   returnQty       Int              // pieces to replace
   receivedQty     Int?             // pieces actually collected from the customer
-  receivedAt DateTime?  
   condition       ReturnCondition? // condition of the collected items
   createdAt       DateTime @default(now())
 
