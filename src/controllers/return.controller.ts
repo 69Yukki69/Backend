@@ -363,8 +363,8 @@ export const submitReturnRequest = async (req: Request, res: Response) => {
  * REJECT  → REJECTED (final).
  * APPROVE → APPROVED. The request becomes an active transaction. Here we:
  *             - re-check each line is still returnable and lock it in (OrderLine.returnedQty +=)
- *             - check we have the stock to replace it
- *           Inventory itself is NOT deducted until dispatch.
+ *           Stock is NOT checked or deducted here: approval can happen while we are out of stock,
+ *           and dispatchReplacement is what refuses to send without enough stock.
  */
 export const reviewReturnRequest = async (req: Request, res: Response) => {
   const returnRequestId = String(req.params.id);
@@ -433,8 +433,8 @@ export const reviewReturnRequest = async (req: Request, res: Response) => {
             );
           }
 
-          // Make sure we can actually replace it (re-checked again at dispatch)
-          await assertCanFulfill(tx, product.id, it.returnQty);
+          // NOTE: stock is intentionally NOT checked here. A valid complaint can be approved
+          // even when the shelf is empty; dispatchReplacement refuses to send until we have stock.
         }
       }
 
@@ -469,6 +469,77 @@ export const reviewReturnRequest = async (req: Request, res: Response) => {
   }
 };
 
+// ── Stock check for replacements ──────────────────────────────────────────────
+type StockTx = Parameters<typeof assertCanFulfill>[0];
+
+type Shortage = {
+  productId:       string;
+  productName:     string;
+  neededPieces:    number;
+  availablePieces: number;
+  needed:          string;   // "1 case"
+  available:       string;   // "0 pcs"
+};
+
+/** Total pieces needed per product (the same product can appear on several lines). */
+const piecesNeededByProduct = (items: any[]) => {
+  const need = new Map<string, { name: string; ppc: number; pieces: number }>();
+  for (const it of items) {
+    const p = it.orderLine.product;
+    const cur = need.get(p.id) ?? { name: p.productName, ppc: p.piecesPerCase as number, pieces: 0 };
+    cur.pieces += it.returnQty;
+    need.set(p.id, cur);
+  }
+  return need;
+};
+
+/**
+ * Which products can't be replaced from current stock (full cases + loose pieces)?
+ * Uses assertCanFulfill, the same rule dispatch enforces, so the answers always agree.
+ * Empty array = enough stock.
+ */
+const findShortages = async (db: StockTx, items: any[]): Promise<Shortage[]> => {
+  const need = piecesNeededByProduct(items);
+  const rows = await (db as any).product.findMany({
+    where:  { id: { in: [...need.keys()] } },
+    select: { id: true, stock: true, loosePieces: true, reservedStock: true },
+  });
+
+  const shortages: Shortage[] = [];
+  for (const [productId, n] of need) {
+    try {
+      await assertCanFulfill(db, productId, n.pieces);
+    } catch (err) {
+      if (!(err instanceof StockError)) throw err;
+      const row = rows.find((r: any) => r.id === productId);
+      // Same rule as planDeduction: cases reserved for pending online orders can't be used,
+      // loose bottles can. (stock - reserved) cases + loose pieces.
+      const available = row
+        ? Math.max(0, row.stock - row.reservedStock) * n.ppc + row.loosePieces
+        : 0;
+      shortages.push({
+        productId,
+        productName:     n.name,
+        neededPieces:    n.pieces,
+        availablePieces: available,
+        needed:          describeQty(n.pieces, n.ppc),
+        available:       describeQty(available, n.ppc),
+      });
+    }
+  }
+  return shortages;
+};
+
+/** Adds `fulfillment` to APPROVED requests so the cashier UI can disable Dispatch. Staff only. */
+const attachFulfillment = async <T extends { status: string; items: any[] }>(list: T[]) =>
+  Promise.all(
+    list.map(async (r) => {
+      if (r.status !== 'APPROVED') return { ...r, fulfillment: null };
+      const shortages = await findShortages(prisma as unknown as StockTx, r.items);
+      return { ...r, fulfillment: { canDispatch: shortages.length === 0, shortages } };
+    })
+  );
+
 // ── PATCH /returns/:id/dispatch ───────────────────────────────────────────────
 /**
  * DISPATCH THE REPLACEMENT (Cashier / Admin)
@@ -501,6 +572,22 @@ export const dispatchReplacement = async (req: Request, res: Response) => {
         select: DRIVER_SELECT,
       });
       if (!driver) throw new ReturnError('Invalid or inactive driver.');
+
+      // Refuse to dispatch when we can't cover the replacement (cases + loose pieces).
+      // Done before the claim so a refused dispatch changes nothing.
+      const pre = await tx.returnRequest.findUnique({
+        where:   { id: returnRequestId },
+        include: { items: { include: ITEM_INCLUDE } },
+      });
+      if (!pre) throw new ReturnError('Return request not found.', 404);
+
+      const shortages = await findShortages(tx as unknown as StockTx, pre.items);
+      if (shortages.length > 0) {
+        const list = shortages
+          .map((s) => `${s.productName}: need ${s.needed}, only ${s.available} in stock`)
+          .join('; ');
+        throw new ReturnError(`Not enough stock to send this replacement. ${list}.`, 409);
+      }
 
       // Atomic claim: only one dispatch can ever win, so stock is deducted once
       const now   = new Date();
@@ -855,7 +942,8 @@ export const getActiveReturns = async (req: Request, res: Response) => {
       },
     });
 
-    res.json(requests.map((r) => withBreakdown(r)));
+    const out = requests.map((r) => withBreakdown(r));
+    res.json(isStaff(requester.role) ? await attachFulfillment(out) : out);
   } catch (err) {
     sendError(res, err, 'Failed to fetch active returns.');
   }
@@ -924,8 +1012,9 @@ export const getReturnRequests = async (req: Request, res: Response) => {
       prisma.returnRequest.count({ where }),
     ]);
 
+    const list = requests.map((r) => withBreakdown(r));
     res.json({
-      requests: requests.map((r) => withBreakdown(r)),
+      requests: isStaff(requester.role) ? await attachFulfillment(list) : list,
       total,
       page,
       limit,
@@ -972,7 +1061,10 @@ export const getReturnRequestById = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Return request not found.' });
     }
 
-    res.json({ returnRequest: withBreakdown(returnRequest) });
+    const detail = withBreakdown(returnRequest);
+    res.json({
+      returnRequest: isStaff(requester.role) ? (await attachFulfillment([detail]))[0] : detail,
+    });
   } catch (err) {
     sendError(res, err, 'Failed to fetch return request.');
   }
@@ -988,8 +1080,6 @@ export const getReturnRequestById = async (req: Request, res: Response) => {
  *
  * Why not complete here? completeReturn restocks collected bottles, and only the
  * driver/cashier can say what was physically collected and in what condition.
- *
- * Paste into controllers/returnRequest.controller.ts (uses its existing imports/helpers).
  */
 export const confirmReplacementReceived = async (req: Request, res: Response) => {
   const returnRequestId = String(req.params.id);

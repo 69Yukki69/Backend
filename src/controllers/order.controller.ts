@@ -455,6 +455,7 @@ export const getCustomerOrders = async (req: Request, res: Response) => {
       cashier:     sale.employee?.name ?? null,
       driver:      sale.driver,                 // { id, name, phone } | null
       createdAt:   sale.createdAt,
+      completedAt: sale.completedAt ?? sale.updatedAt, // start of the 24h return window
       totalAmount: sale.totalAmount,
       payment:     sale.payment,
       orderLines:  sale.orderLines.map((line) => ({
