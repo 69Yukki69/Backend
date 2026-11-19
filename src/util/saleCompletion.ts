@@ -14,22 +14,38 @@ const REASON: Record<CompletedBy, string> = {
 
 /**
  * Single place that completes a sale (stock deduction, logs, notifications).
- * Used by the cashier, the customer, and the auto-complete job.
- * Returns false if the order was not OUT_FOR_DELIVERY (already completed/cancelled).
+ * Used by the cashier and the auto-complete job.
+ *
+ * Normal flow: OUT_FOR_DELIVERY -> RECEIVED (customer confirms) -> COMPLETED (cashier,
+ * after collecting the driver's cash). OUT_FOR_DELIVERY is still accepted so the
+ * 24h auto-complete job keeps working.
+ *
+ * remittedAmount: cash the driver handed to the cashier (cash orders only).
+ * Returns false if the order was not OUT_FOR_DELIVERY / RECEIVED (already completed/cancelled).
  */
-export async function completeSale(saleId: string, by: CompletedBy, cashierId?: string) {
+export async function completeSale(
+  saleId: string,
+  by: CompletedBy,
+  cashierId?: string,
+  remittedAmount?: number
+) {
   const claimed = await prisma.$transaction(async (tx) => {
     const order = await tx.saleRecord.findUnique({ where: { id: saleId } });
     if (!order) throw new Error('Order not found.');
 
-    // Atomic claim: only one caller can flip OUT_FOR_DELIVERY -> COMPLETED
+    // Atomic claim: only one caller can move the order to COMPLETED
     const claim = await tx.saleRecord.updateMany({
-      where: { id: saleId, status: 'OUT_FOR_DELIVERY' },
+      where: { id: saleId, status: { in: ['OUT_FOR_DELIVERY', 'RECEIVED'] } },
       data: {
         status: 'COMPLETED',
         completedAt: new Date(),
         completedBy: by,
         ...(cashierId && { employeeId: cashierId }),
+        ...(remittedAmount !== undefined && {
+          remittedAmount,
+          remittedAt:   new Date(),
+          remittedById: cashierId,
+        }),
       },
     });
     if (claim.count === 0) return false;

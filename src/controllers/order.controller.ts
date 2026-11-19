@@ -169,10 +169,13 @@ export const placeOrder = async (req: Request, res: Response) => {
 };
 
 // Allowed status transitions
+// OUT_FOR_DELIVERY -> RECEIVED: customer (or cashier, for walk-ins) confirms arrival
+// RECEIVED -> COMPLETED: cashier, after collecting the driver's cash
 const ALLOWED_NEXT: Record<string, string[]> = {
   PENDING:          ['PROCESSING', 'CANCELLED'],
   PROCESSING:       ['OUT_FOR_DELIVERY', 'CANCELLED'],
-  OUT_FOR_DELIVERY: ['COMPLETED', 'CANCELLED'],
+  OUT_FOR_DELIVERY: ['RECEIVED', 'CANCELLED'],
+  RECEIVED:         ['COMPLETED'],
 };
 
 // ── GET /orders/drivers ───────────────────────────────────────────────────────
@@ -196,11 +199,11 @@ export const getDrivers = async (req: Request, res: Response) => {
 
 // ── PATCH /orders/:id/status ──────────────────────────────────────────────────
 export const updateOrderStatus = async (req: Request, res: Response) => {
-  const id                 = String(req.params.id);
-  const { status, driverId } = req.body;
-  const requester          = (req as any).user as { id: string; role: string };
+  const id                                    = String(req.params.id);
+  const { status, driverId, remittedAmount }  = req.body;
+  const requester                             = (req as any).user as { id: string; role: string };
 
-  const validStatuses = ['PENDING', 'PROCESSING', 'OUT_FOR_DELIVERY', 'COMPLETED', 'CANCELLED'];
+  const validStatuses = ['PENDING', 'PROCESSING', 'OUT_FOR_DELIVERY', 'RECEIVED', 'COMPLETED', 'CANCELLED'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({
       message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
@@ -234,14 +237,14 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       });
     }
 
-    // ── Guard: customers can only mark as COMPLETED or CANCELLED ────────────
+    // ── Guard: customers can only confirm receipt or cancel ─────────────────
     if (requester.role === 'CUSTOMER') {
       if (order.customerId !== requester.id) {
         return res.status(403).json({ message: 'You can only update your own orders.' });
       }
-      if (!['COMPLETED', 'CANCELLED'].includes(status)) {
+      if (!['RECEIVED', 'CANCELLED'].includes(status)) {
         return res.status(403).json({
-          message: 'Customers can only mark orders as received (COMPLETED) or cancelled.',
+          message: 'Customers can only mark orders as received or cancelled.',
         });
       }
       // Paid GCash orders (and anything past PENDING) cannot be cancelled online
@@ -252,11 +255,27 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // ── Guard: staff cannot complete orders linked to a customer account ────
-    if (status === 'COMPLETED' && requester.role !== 'CUSTOMER' && order.customerId) {
+    // ── Guard: staff can only mark RECEIVED for walk-in orders (no account) ─
+    if (status === 'RECEIVED' && requester.role !== 'CUSTOMER' && order.customerId) {
       return res.status(403).json({
-        message: 'Orders linked to a customer account can only be completed by that customer.',
+        message: 'Orders linked to a customer account can only be marked received by that customer.',
       });
+    }
+
+    // ── Guard: completing is a cashier step (after the driver hands over cash)
+    if (status === 'COMPLETED' && requester.role === 'CUSTOMER') {
+      return res.status(403).json({ message: 'Only the cashier can complete an order.' });
+    }
+
+    // ── Guard: cash orders need the amount the driver handed over ───────────
+    let remitted: number | undefined;
+    if (status === 'COMPLETED' && order.payment?.method === 'CASH') {
+      const n = Number(remittedAmount);
+      const missing = remittedAmount === undefined || remittedAmount === null || remittedAmount === '';
+      if (missing || !Number.isFinite(n) || n < 0) {
+        return res.status(400).json({ message: 'Enter the cash the driver handed over.' });
+      }
+      remitted = round2(n);
     }
 
     // ── Guard: a driver must be picked before dispatch ──────────────────────
@@ -276,14 +295,13 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       }
     }
 
-    // ── COMPLETED: shared completion logic ───────────────────────────────────
+    // ── COMPLETED: shared completion logic (also saves the remitted cash) ───
     if (status === 'COMPLETED') {
-      const by = requester.role === 'CUSTOMER' ? 'CUSTOMER' : 'CASHIER';
-      const ok = await completeSale(id, by, by === 'CASHIER' ? requester.id : undefined);
+      const ok = await completeSale(id, 'CASHIER', requester.id, remitted);
       if (!ok) {
         return res.status(409).json({ message: 'Order was already completed or cancelled.' });
       }
-      return res.json({ message: 'Order marked as completed and stock deducted.' });
+      return res.json({ message: 'Order completed and stock deducted.' });
     }
 
     // ── CANCELLED: release reservation only ───────────────────────────────────
@@ -321,7 +339,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
       return res.json({ message: 'Order cancelled and stock reservation released.' });
     }
 
-    // ── PROCESSING, OUT_FOR_DELIVERY ─────────────────────────────────────────
+    // ── PROCESSING, OUT_FOR_DELIVERY, RECEIVED ───────────────────────────────
     // The driver is only written when moving to OUT_FOR_DELIVERY, and that
     // status is only reachable once (from PROCESSING), so it can't be reassigned.
     const claim = await prisma.saleRecord.updateMany({
@@ -332,6 +350,7 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           outForDeliveryAt: new Date(),
           driverId:         driverForDispatch!.id,
         }),
+        ...(status === 'RECEIVED' && { receivedAt: new Date() }),
         ...(requester.role !== 'CUSTOMER' && { employeeId: requester.id }),
       },
     });
@@ -357,6 +376,15 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           driver: driverForDispatch ?? undefined,
         });
       }
+    }
+
+    // Tell the cashiers so their Active Orders page refreshes and shows the Complete step
+    if (status === 'RECEIVED') {
+      io.to('cashiers').emit('order:status', {
+        orderId: id,
+        status,
+        message: `📦 Order ${id} was received. Collect the cash from the driver.`,
+      });
     }
 
     res.json(updated);

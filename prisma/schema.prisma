@@ -48,6 +48,7 @@ enum SaleStatus {
   PENDING
   PROCESSING
   OUT_FOR_DELIVERY
+  RECEIVED            // customer (or cashier, for walk-ins) confirmed arrival; waiting for the driver's cash
   COMPLETED
   PARTIALLY_RETURNED
   CANCELLED
@@ -236,6 +237,10 @@ model SaleRecord {
   outForDeliveryAt DateTime?      // starts the 24h auto-complete clock
   completedAt      DateTime?
   completedBy      CompletedBy?
+  receivedAt     DateTime?
+  remittedAmount Float?     // cash the driver handed to the cashier
+  remittedAt     DateTime?
+  remittedById   String? 
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
