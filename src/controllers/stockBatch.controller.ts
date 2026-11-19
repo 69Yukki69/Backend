@@ -4,6 +4,7 @@ import {
   getExpiringBatchesService,
   getExpiredBatchesService,
   writeOffExpiredBatchesService,
+  writeOffBatchService,
   getAllActiveBatchesService,
   updateBatchExpiryService
 } from "../util/stockBatch";
@@ -54,6 +55,26 @@ export const writeOffExpiredBatchesController = async (req: Request, res: Respon
     res.json(result);
   } catch (error) {
     res.status(500).json({ message: "Failed to write off expired batches" });
+  }
+};
+
+// POST /stock-batches/:id/write-off
+// Deducts ONE expired batch from inventory (employee comes from the auth token)
+export const writeOffBatchController = async (req: Request, res: Response) => {
+  try {
+    const employeeId = (req as any).user?.id as string | undefined;
+    if (!employeeId) return res.status(401).json({ message: "Not authenticated" });
+
+    res.json(await writeOffBatchService(getParam(req, "id"), employeeId));
+  } catch (error: any) {
+    const map: Record<string, [number, string]> = {
+      BATCH_NOT_FOUND:   [404, "Stock batch not found"],
+      BATCH_EMPTY:       [400, "This batch has no stock left"],
+      BATCH_NOT_EXPIRED: [400, "This batch is not expired yet"],
+    };
+    const hit = map[error?.message];
+    if (hit) return res.status(hit[0]).json({ message: hit[1] });
+    res.status(500).json({ message: "Failed to deduct the expired batch" });
   }
 };
 

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../config/db';
 import { generateId } from '../util/generateId';
 import { getStock, getStockMany } from '../util/stock';
+import { deductBatchesForAdjustmentService } from '../util/stockBatch';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -145,7 +146,13 @@ export const adjustStock = async (req: Request, res: Response) => {
         data: { stock: { increment: qty } },
       });
 
-      // ── 2. Log the adjustment ────────────────────────────────────────
+      // ── 2. Deductions also lower the batches (earliest expiry first),
+      //       so an expired / damaged batch can't keep showing stock ──────
+      if (qty < 0) {
+        await deductBatchesForAdjustmentService(tx, productId, Math.abs(qty));
+      }
+
+      // ── 3. Log the adjustment ────────────────────────────────────────
       await tx.inventoryLog.create({
         data: {
           id,

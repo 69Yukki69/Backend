@@ -170,3 +170,55 @@ export const getAllActiveBatchesService = () =>
 
 export const updateBatchExpiryService = async (id: string, expiryDate: Date | null) =>
   prisma.stockBatch.update({ where: { id }, data: { expiryDate } });
+
+// Write off ONE expired batch (stock manager presses "Deduct" on the Expiration tab):
+// zeros the batch, decrements the product's stock, logs ADJUSTMENT / EXPIRED.
+// Product stock is clamped at 0 in case old data was out of sync with the batches.
+export const writeOffBatchService = async (batchId: string, employeeId: string) => {
+  const logId = await generateId("inventoryLog");
+
+  return prisma.$transaction(async (tx) => {
+    const batch = await tx.stockBatch.findUnique({
+      where: { id: batchId },
+      include: { product: true },
+    });
+    if (!batch) throw new Error("BATCH_NOT_FOUND");
+    if (batch.remaining <= 0) throw new Error("BATCH_EMPTY");
+
+    // Same rule as the page: expired only once the expiry DAY has passed
+    const now = new Date();
+    const startOfToday = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    if (!batch.expiryDate || batch.expiryDate >= startOfToday) throw new Error("BATCH_NOT_EXPIRED");
+
+    const qty = batch.remaining;
+    const productDeduct = Math.min(qty, batch.product.stock);
+
+    await tx.stockBatch.update({
+      where: { id: batch.id },
+      data: { remaining: 0 },
+    });
+
+    if (productDeduct > 0) {
+      await tx.product.update({
+        where: { id: batch.productId },
+        data: { stock: { decrement: productDeduct } },
+      });
+    }
+
+    await tx.inventoryLog.create({
+      data: {
+        id: logId,
+        productId: batch.productId,
+        employeeId,
+        quantity: -qty, // negative = loss (matches loss-report entries)
+        type: "ADJUSTMENT",
+        lossReason: "EXPIRED",
+        reason: `Expired batch written off (${batch.id})`,
+        referenceId: batch.id,
+        referenceType: "STOCK_BATCH",
+      },
+    });
+
+    return { batchId: batch.id, productId: batch.productId, writtenOff: qty, productDeducted: productDeduct };
+  });
+};
