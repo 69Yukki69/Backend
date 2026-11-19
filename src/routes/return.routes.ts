@@ -39,6 +39,7 @@ router.patch('/:id/cancel', authMiddleware(['ADMIN', 'CASHIER']), cancelReturnRe
 // PATCH  /returns/:id          — cashier approves or rejects a pending request
 router.patch('/:id', authMiddleware(['ADMIN', 'CASHIER']), reviewReturnRequest);
 
-router.patch('/returns/:id/received', authMiddleware(['CASHIER', 'CUSTOMER']), confirmReplacementReceived);
+// PATCH  /returns/:id/received — customer confirms the replacement is in their hands
+router.patch('/:id/received', authMiddleware(['ADMIN', 'CASHIER', 'CUSTOMER']), confirmReplacementReceived);
 
 export default router;
