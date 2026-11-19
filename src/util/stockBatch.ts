@@ -33,6 +33,35 @@ export const deductStockFIFOService = async (
   if (left > 0) throw new Error(`Insufficient batch stock for product ${productId}`);
 };
 
+// Manual deduction (Expired / Damaged / Audit Correction):
+// lowers batch `remaining`, earliest expiry first.
+// Does NOT throw if batches hold less than requested (old data may be out of sync).
+// Returns the number of cases that no batch could cover.
+export const deductBatchesForAdjustmentService = async (
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  productId: string,
+  qtyCases: number
+) => {
+  let left = Math.floor(qtyCases);
+  if (left <= 0) return 0;
+
+  const batches = await tx.stockBatch.findMany({
+    where: { productId, remaining: { gt: 0 } },
+    orderBy: [{ expiryDate: "asc" }, { receivedAt: "asc" }],
+  });
+
+  for (const batch of batches) {
+    if (left <= 0) break;
+    const deduct = Math.min(batch.remaining, left);
+    await tx.stockBatch.update({
+      where: { id: batch.id },
+      data: { remaining: { decrement: deduct } },
+    });
+    left -= deduct;
+  }
+  return left;
+};
+
 // Get all active batches for a product (remaining > 0)
 export const getStockBatchesByProductService = async (productId: string) => {
   return await prisma.stockBatch.findMany({
@@ -139,5 +168,5 @@ export const getAllActiveBatchesService = () =>
     select: { id: true, productId: true, remaining: true, expiryDate: true, receivedAt: true },
   });
 
-  export const updateBatchExpiryService = async (id: string, expiryDate: Date | null) =>
+export const updateBatchExpiryService = async (id: string, expiryDate: Date | null) =>
   prisma.stockBatch.update({ where: { id }, data: { expiryDate } });
