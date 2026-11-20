@@ -19,8 +19,8 @@ export const PlaceOrderDto = z.object({
     .array(
       z.object({
         productId: z.string().min(1, 'Product ID is required'),
-        quantity:  z.number().int().positive('Quantity must be a positive integer'),
-        price:     z.number().positive('Price must be positive'),
+        quantity: z.number().int().positive('Quantity must be a positive integer'),
+        price: z.number().positive('Price must be positive'),
       })
     )
     .min(1, 'Order must have at least one item'),
@@ -28,24 +28,36 @@ export const PlaceOrderDto = z.object({
   (data) => data.paymentMethod !== 'gcash' || (data.gcashRef && data.gcashRef.trim().length > 0),
   {
     message: 'GCash reference number is required when paying via GCash',
-    path:    ['gcashRef'],
+    path: ['gcashRef'],
   }
 ).refine(
   (data) => data.paymentMethod !== 'gcash' || (data.receiptImage && data.receiptImage.trim().length > 0),
   {
     message: 'GCash payment receipt is required when paying via GCash',
-    path:    ['receiptImage'],
+    path: ['receiptImage'],
   }
 );
 
 export const UpdateOrderStatusDto = z.object({
   status: z.enum(
-    ['PENDING', 'PROCESSING', 'OUT_FOR_DELIVERY', 'COMPLETED', 'PARTIALLY_RETURNED', 'CANCELLED', 'REFUNDED'],
+    [
+      'PENDING',
+      'PROCESSING',
+      'OUT_FOR_DELIVERY',
+      'RECEIVED', // customer confirms arrival (OUT_FOR_DELIVERY -> RECEIVED)
+      'COMPLETED',
+      'PARTIALLY_RETURNED',
+      'CANCELLED',
+      'REFUNDED',
+    ],
     { error: 'Invalid order status' }
   ),
   // Required by the controller only when status is OUT_FOR_DELIVERY
   driverId: z.string().min(1).optional(),
+  // Required by the controller only when completing a CASH order:
+  // the cash the driver handed over to the cashier
+  remittedAmount: z.union([z.number().nonnegative(), z.string()]).optional(),
 });
 
-export type PlaceOrderType        = z.infer<typeof PlaceOrderDto>;
+export type PlaceOrderType = z.infer<typeof PlaceOrderDto>;
 export type UpdateOrderStatusType = z.infer<typeof UpdateOrderStatusDto>;
