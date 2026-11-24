@@ -191,7 +191,9 @@ export const writeOffBatchService = async (batchId: string, employeeId: string) 
     if (!batch.expiryDate || batch.expiryDate >= startOfToday) throw new Error("BATCH_NOT_EXPIRED");
 
     const qty = batch.remaining;
-    const productDeduct = Math.min(qty, batch.product.stock);
+    // Product stock is clamped at 0 in case old data was out of sync with the batches
+    const productDeduct = Math.min(qty, Math.max(0, batch.product.stock));
+    const shortfall     = qty - productDeduct; // cases the batch held that the product total did not
 
     await tx.stockBatch.update({
       where: { id: batch.id },
@@ -203,22 +205,26 @@ export const writeOffBatchService = async (batchId: string, employeeId: string) 
         where: { id: batch.productId },
         data: { stock: { decrement: productDeduct } },
       });
+
+      // The log must match what actually left product.stock, otherwise the
+      // inventory log total drifts away from the stock (this was the Kasalo Coke bug).
+      await tx.inventoryLog.create({
+        data: {
+          id: logId,
+          productId: batch.productId,
+          employeeId,
+          quantity: -productDeduct, // negative = loss (matches loss-report entries)
+          type: "ADJUSTMENT",
+          lossReason: "EXPIRED",
+          reason:
+            `Expired batch written off (${batch.id})` +
+            (shortfall > 0 ? ` — batch held ${qty} but product stock only allowed ${productDeduct}` : ""),
+          referenceId: batch.id,
+          referenceType: "STOCK_BATCH",
+        },
+      });
     }
 
-    await tx.inventoryLog.create({
-      data: {
-        id: logId,
-        productId: batch.productId,
-        employeeId,
-        quantity: -qty, // negative = loss (matches loss-report entries)
-        type: "ADJUSTMENT",
-        lossReason: "EXPIRED",
-        reason: `Expired batch written off (${batch.id})`,
-        referenceId: batch.id,
-        referenceType: "STOCK_BATCH",
-      },
-    });
-
-    return { batchId: batch.id, productId: batch.productId, writtenOff: qty, productDeducted: productDeduct };
+    return { batchId: batch.id, productId: batch.productId, writtenOff: qty, productDeducted: productDeduct, shortfall };
   });
 };
