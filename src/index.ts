@@ -18,6 +18,7 @@ import lossReportRoutes from './routes/loss.routes';
 import stockBatchRoutes from './routes/stockBatch.routes';
 import reorderRoutes    from './routes/reorder.routes';
 import paymentRoutes    from './routes/payment.routes';               // ← ADDED
+import orderRequestRoutes from './routes/orderRequest.routes';       // ← ADDED (match your file name)
 import { startAutoCompleteJob } from './util/autoComplete';           // ← ADDED
 
 const app = express();
@@ -85,6 +86,10 @@ io.on('connection', (socket) => {
     console.log('🚨🚨🚨 JOIN EVENT RECEIVED:', payload);
     socket.join(`user:${payload.id}`);
 
+    if (payload.role === 'ADMIN') {
+      socket.join('admins');                                            // ← ADDED: receives orderRequest:new
+    }
+
     if (payload.role === 'CASHIER' || payload.role === 'ADMIN') {
       socket.join('cashiers');
       console.log(`${payload.role} ${payload.id} joined cashiers room`);
@@ -122,6 +127,7 @@ app.use('/api/loss-reports', lossReportRoutes);
 app.use('/api/stock-batches', stockBatchRoutes);
 app.use('/api/reorder',       reorderRoutes);
 app.use('/api/payments',      paymentRoutes);                         // ← ADDED
+app.use('/api/order-requests', orderRequestRoutes);                   // ← ADDED: PO requests
 
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'OK' });
