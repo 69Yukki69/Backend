@@ -195,7 +195,10 @@ export const updatePromo = async (req: Request, res: Response) => {
 // TOGGLE isActive
 export const togglePromo = async (req: Request, res: Response) => {
   try {
-    const existing = await prisma.promotionSale.findUnique({ where: { id: String(req.params.id) } });
+    const existing = await prisma.promotionSale.findUnique({
+      where:   { id: String(req.params.id) },
+      include: { product: true },
+    });
     if (!existing) {
       return res.status(404).json({ message: 'Promotion not found' });
     }
@@ -210,10 +213,14 @@ export const togglePromo = async (req: Request, res: Response) => {
       return res.json(promo);
     }
 
-    // Inactive -> Active: a fresh date range is required
-    const { dateEffective, lastDate } = req.body ?? {};
+    // Inactive -> Active: a fresh date range and discount are required
+    const { dateEffective, lastDate, discountPercent } = req.body ?? {};
     if (!dateEffective || !lastDate) {
       return res.status(400).json({ message: 'Set a new start and end date to reactivate this promo.' });
+    }
+    const pct = parsePercent(discountPercent);
+    if (pct === null) {
+      return res.status(400).json({ message: 'Discount must be between 1 and 99 percent.' });
     }
     const start = startOfDay(String(dateEffective));
     const end   = endOfDay(String(lastDate));
@@ -226,7 +233,13 @@ export const togglePromo = async (req: Request, res: Response) => {
 
     const promo = await prisma.promotionSale.update({
       where:   { id: existing.id },
-      data:    { isActive: true, dateEffective: start, lastDate: end },
+      data: {
+        isActive:        true,
+        dateEffective:   start,
+        lastDate:        end,
+        discountPercent: pct,
+        alteredPrice:    round2(existing.product.price * (1 - pct / 100)),
+      },
       include: { product: true },
     });
     res.json(promo);
