@@ -247,11 +247,18 @@ export const updateOrderStatus = async (req: Request, res: Response) => {
           message: 'Customers can only mark orders as received or cancelled.',
         });
       }
-      // Paid GCash orders (and anything past PENDING) cannot be cancelled online
-      if (status === 'CANCELLED' && (order.status !== 'PENDING' || order.payment?.method === 'GCASH')) {
-        return res.status(403).json({
-          message: 'This order can no longer be cancelled online. Please contact the store.',
-        });
+      // Customers can cancel while PENDING or PROCESSING. Paid GCash orders must contact the store.
+      if (status === 'CANCELLED') {
+        if (!['PENDING', 'PROCESSING'].includes(order.status)) {
+          return res.status(403).json({
+            message: 'This order can no longer be cancelled online. Please contact the store.',
+          });
+        }
+        if (order.payment?.method === 'GCASH') {
+          return res.status(403).json({
+            message: 'GCash orders cannot be cancelled online. Please contact the store for a refund.',
+          });
+        }
       }
     }
 
