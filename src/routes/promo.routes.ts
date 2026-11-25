@@ -22,7 +22,7 @@ router.get('/',        authMiddleware(["ADMIN", "CASHIER", "CUSTOMER"]), getProm
 router.get('/:id',     authMiddleware(["ADMIN", "CASHIER", "CUSTOMER"]), getPromo);
 router.post('/',       authMiddleware(["ADMIN"]), validate(CreatePromoDto), createPromo);
 router.put('/:id',     authMiddleware(["ADMIN"]), validate(UpdatePromoDto), updatePromo);
-router.patch('/:id',   authMiddleware(["ADMIN"]), togglePromo);
+router.patch('/:id/toggle', authMiddleware(["ADMIN"]), togglePromo);   // was '/:id'
 router.delete('/:id',  authMiddleware(["ADMIN"]), deletePromo);
 
 export default router;
