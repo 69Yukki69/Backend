@@ -9,9 +9,17 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const startOfDay = (v: string) => new Date(DATE_ONLY.test(v) ? `${v}T00:00:00+08:00` : v);
 const endOfDay   = (v: string) => new Date(DATE_ONLY.test(v) ? `${v}T23:59:59.999+08:00` : v);
 
+// Switch off every promo whose last day has passed. Called before reads and on a timer.
+export const expireOldPromos = () =>
+  prisma.promotionSale.updateMany({
+    where: { isActive: true, lastDate: { lt: new Date() } },
+    data:  { isActive: false },
+  });
+
 // GET all promotions
 export const getPromos = async (req: Request, res: Response) => {
   try {
+    await expireOldPromos();
     const promos = await prisma.promotionSale.findMany({
       orderBy: { createdAt: 'desc' },
       include: { product: true }
@@ -25,6 +33,7 @@ export const getPromos = async (req: Request, res: Response) => {
 // GET active promotions only
 export const getActivePromos = async (req: Request, res: Response) => {
   try {
+    await expireOldPromos();
     const now = new Date();
     const promos = await prisma.promotionSale.findMany({
       where: {
@@ -44,6 +53,7 @@ export const getActivePromos = async (req: Request, res: Response) => {
 // GET single promotion
 export const getPromo = async (req: Request, res: Response) => {
   try {
+    await expireOldPromos();
     const promo = await prisma.promotionSale.findUnique({
       where: { id: String(req.params.id) },
       include: { product: true }
@@ -156,6 +166,12 @@ export const updatePromo = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'The start date must not be after the end date.' });
     }
 
+    // An expired promo can only be switched on together with a new end date.
+    const willBeActive = isActive ?? existing.isActive;
+    if (willBeActive && (end ?? existing.lastDate) < new Date()) {
+      return res.status(400).json({ message: 'This promo has expired. Set a new end date to activate it.' });
+    }
+
     const promo = await prisma.promotionSale.update({
       where: { id: String(req.params.id) },
       data: {
@@ -184,15 +200,39 @@ export const togglePromo = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Promotion not found' });
     }
 
-    const promo = await prisma.promotionSale.update({
-      where: { id: String(req.params.id) },
-      data:  { isActive: !existing.isActive },
-      include: { product: true }
-    });
+    // Active -> Inactive: no body needed
+    if (existing.isActive) {
+      const promo = await prisma.promotionSale.update({
+        where:   { id: existing.id },
+        data:    { isActive: false },
+        include: { product: true },
+      });
+      return res.json(promo);
+    }
 
+    // Inactive -> Active: a fresh date range is required
+    const { dateEffective, lastDate } = req.body ?? {};
+    if (!dateEffective || !lastDate) {
+      return res.status(400).json({ message: 'Set a new start and end date to reactivate this promo.' });
+    }
+    const start = startOfDay(String(dateEffective));
+    const end   = endOfDay(String(lastDate));
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+      return res.status(400).json({ message: 'The start date must not be after the end date.' });
+    }
+    if (end < new Date()) {
+      return res.status(400).json({ message: 'The end date has already passed.' });
+    }
+
+    const promo = await prisma.promotionSale.update({
+      where:   { id: existing.id },
+      data:    { isActive: true, dateEffective: start, lastDate: end },
+      include: { product: true },
+    });
     res.json(promo);
   } catch (err) {
-    res.status(500).json({ message: 'Failed to toggle promotion', error: err });
+    console.error('togglePromo failed:', err);
+    res.status(500).json({ message: 'Failed to toggle promotion.' });
   }
 };
 
